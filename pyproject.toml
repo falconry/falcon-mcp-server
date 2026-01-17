@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "falcon-mcp-server"
+dynamic = ["version"]
+description = "MCP server component for Falcon apps."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = []
+authors = [
+  { name = "Vytautas Liuolia", email = "vytautas.liuolia@gmail.com" },
+]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = [
+    "falcon >= 4.2",
+]
+
+[project.urls]
+Issues = "https://github.com/falconry/falcon-mcp-server/issues"
+Source = "https://github.com/falconry/falcon-mcp-server"
+
+[tool.hatch.version]
+path = "src/falcon_mcp_server/__about__.py"
