@@ -15,7 +15,7 @@
 
 Install from PyPI:
 ```console
-pip install falcon-mcp-server[serve,toon]
+pip install falcon-mcp-server[serve]
 ```
 
 This is a fast-moving project in its early stages where new versions are not
