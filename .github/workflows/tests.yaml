@@ -1,0 +1,45 @@
+# Run tests using Tox.
+name: tox
+
+on:
+  push:
+    branches:
+      - "*"
+    pull_request:
+      branches:
+        - master
+
+jobs:
+  tox:
+    name: tox (python${{ matrix.python-version }})
+    runs-on: "ubuntu-latest"
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install --upgrade tox
+          python --version
+          pip --version
+          tox --version
+
+      - name: Run tox
+        run: |
+          tox
