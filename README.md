@@ -18,7 +18,7 @@ Install from PyPI:
 pip install falcon-mcp-server[serve,toon]
 ```
 
-This is a fast-moving project in its early stages where new version are not
+This is a fast-moving project in its early stages where new versions are not
 always immediately released to PyPI. To install directly from the `main` branch:
 ```console
 pip install git+https://github.com/falconry/falcon-mcp-server
