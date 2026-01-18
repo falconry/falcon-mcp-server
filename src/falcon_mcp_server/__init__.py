@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-__all__ = ("__version__",)
+__all__ = ('__version__', 'MCP')
 
 from .__about__ import __version__
+from .mcp import MCP

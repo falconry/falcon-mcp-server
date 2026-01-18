@@ -29,9 +29,42 @@ dependencies = [
     "falcon >= 4.2",
 ]
 
+[project.optional-dependencies]
+serve = [
+    "uvicorn",
+]
+toon = [
+  "toon-format @ git+https://github.com/toon-format/toon-python",
+]
+
+[project.scripts]
+falcon-mcp-server = "falcon_mcp_server.serve:main"
+
 [project.urls]
 Issues = "https://github.com/falconry/falcon-mcp-server/issues"
 Source = "https://github.com/falconry/falcon-mcp-server"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.version]
 path = "src/falcon_mcp_server/__about__.py"
+
+[tool.ruff]
+line-length = 79
+target-version = "py310"
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint]
+select = ["C9", "E", "F", "W", "I"]
+
+[tool.ruff.lint.isort]
+force-single-line = true
+single-line-exclusions = [
+    "typing",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
