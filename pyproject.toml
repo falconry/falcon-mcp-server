@@ -34,9 +34,10 @@ serve = [
     "PyYAML",
     "uvicorn",
 ]
-toon = [
-  "toon-format @ git+https://github.com/toon-format/toon-python",
-]
+# PyPI does not allow "direct" dependencies :(
+# toon = [
+#   "toon-format @ git+https://github.com/toon-format/toon-python",
+# ]
 
 [project.scripts]
 falcon-mcp-server = "falcon_mcp_server.serve:main"
