@@ -1,0 +1,4 @@
+mcpServers:
+  falcon-mcp-server:
+    type: remote
+    url: 'http://localhost:8000/mcp'
