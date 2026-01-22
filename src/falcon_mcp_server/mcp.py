@@ -25,8 +25,25 @@ class MCP:
         self.on_get = self._streamable_http.on_get
         self.on_post = self._streamable_http.on_post
 
-    # TODO: add_simple_resource(...)
     # TODO: add_prompt(...)
+
+    def add_simple_resource(
+        self,
+        uri: str,
+        media_type: str,
+        data: str | bytes,
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+    ) -> None:
+        self._rpc_server.resources.add_simple_resource(
+            uri,
+            media_type,
+            data,
+            name=name,
+            title=title,
+            description=description,
+        )
 
     def add_tool(
         self,

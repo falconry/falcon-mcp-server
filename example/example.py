@@ -1,4 +1,9 @@
+import pathlib
+
 import falcon_mcp_server
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+README = ROOT / 'README.md'
 
 
 async def get_temperature(city: str) -> str:
@@ -19,6 +24,7 @@ async def get_temperature(city: str) -> str:
 
 
 mcp = falcon_mcp_server.MCP()
+
 mcp.add_tool(
     get_temperature,
     title='City weather information provider',
@@ -29,4 +35,11 @@ mcp.add_tool(
         },
         'required': ['city'],
     },
+)
+
+mcp.add_simple_resource(
+    'file:///project/README.md',
+    'text/markdown',
+    README.read_text(),
+    title='Project Documentation',
 )

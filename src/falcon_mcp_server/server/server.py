@@ -40,6 +40,9 @@ class RPCServer:
             # Utilities
             'logging/setLevel': self._logging_set_level,
             'ping': self._ping,
+            # Resources
+            'resources/list': self._resources_list,
+            'resources/read': self._resources_read,
             # Tools
             'tools/call': self._tools_call,
             'tools/list': self._tools_list,
@@ -124,6 +127,7 @@ class RPCServer:
             'protocolVersion': protocol_version,
             'capabilities': {
                 'logging': {},
+                'resources': {},
                 'tools': {},
             },
             'serverInfo': self._server_info,
@@ -139,6 +143,19 @@ class RPCServer:
         self, params: dict[str, Any], session: Session
     ) -> dict[str, Any] | None:
         return {}
+
+    async def _resources_list(
+        self, params: dict[str, Any], session: Session
+    ) -> dict[str, Any] | None:
+        return await self._resources.list_resources()
+
+    async def _resources_read(
+        self, params: dict[str, Any], session: Session
+    ) -> dict[str, Any] | None:
+        # TODO(vytas): Handle missing name/arguments.
+        uri = params['uri']
+        resource = await self._resources.read_resource(uri)
+        return {'contents': [resource]}
 
     async def _tools_call(
         self, params: dict[str, Any], session: Session
