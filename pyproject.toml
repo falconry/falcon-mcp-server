@@ -52,6 +52,10 @@ allow-direct-references = true
 [tool.hatch.version]
 path = "src/falcon_mcp_server/__about__.py"
 
+[[tool.mypy.overrides]]
+module = ["toon_format"]
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 79
 target-version = "py311"

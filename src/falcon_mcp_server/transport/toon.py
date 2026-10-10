@@ -9,7 +9,8 @@ class TOONHandler(falcon.media.BaseHandler):
     """Token-Oriented Object Notation (TOON) media handler for Falcon."""
 
     def serialize(self, media: object, content_type: str) -> bytes:
-        return toon_format.encode(media).encode()
+        text: str = toon_format.encode(media)
+        return text.encode()
 
     def deserialize(
         self,

@@ -69,7 +69,9 @@ class MCP:
             input_schema=input_schema,
         )
 
-    def create_app(self, cors_enable: bool = False) -> falcon.asgi.App:
+    def create_app(
+        self, cors_enable: bool = False
+    ) -> falcon.asgi.App[falcon.asgi.Request, falcon.asgi.Response]:
         """Create a Falcon app serving this MCP end point at ``/mcp``.
 
         Args:
@@ -77,12 +79,11 @@ class MCP:
                 letting web frontends served from the allowed origins access
                 the end point (default ``False``).
         """
-        middleware = []
+        app = falcon.asgi.App()
         if cors_enable:
-            middleware.append(
+            app.add_middleware(
                 falcon.CORSMiddleware(allow_origins=self._allowed_origins)
             )
 
-        app = falcon.asgi.App(middleware=middleware)
         app.add_route('/mcp', self)
         return app

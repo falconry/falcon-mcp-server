@@ -120,7 +120,7 @@ class StreamableHTTP:
                 f'not match body value {method!r}'
             )
 
-        name = _get(params, _MCP_NAME_PARAMS.get(method, ''))
+        name = _get(params, _MCP_NAME_PARAMS.get(str(method), ''))
         header = req.get_header('Mcp-Name')
         if name is not None and _decode_header(header) != name:
             raise errors.RPCHeaderMismatch(

@@ -30,6 +30,13 @@ except ImportError:
 CACHE_HINTS = {'ttlMs': 0, 'cacheScope': 'private'}
 
 
+def _get_str(params: dict[str, Any], name: str) -> str:
+    value = params.get(name)
+    if not isinstance(value, str):
+        raise errors.RPCInvalidParam(f'Missing or invalid parameter: {name}')
+    return value
+
+
 class RPCServer:
     def __init__(
         self,
@@ -178,11 +185,12 @@ class RPCServer:
         return {**result, **CACHE_HINTS}
 
     async def _resources_read(self, params: dict[str, Any]) -> dict[str, Any]:
-        resource = await self._resources.read_resource(params.get('uri'))
+        uri = _get_str(params, 'uri')
+        resource = await self._resources.read_resource(uri)
         return {'contents': [resource], **CACHE_HINTS}
 
     async def _tools_call(self, params: dict[str, Any]) -> dict[str, Any]:
-        name = params.get('name')
+        name = _get_str(params, 'name')
         arguments = params.get('arguments') or {}
 
         result = await self._tools.call_tool(name, arguments)
