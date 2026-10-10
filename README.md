@@ -33,20 +33,31 @@ Change dir to ``example/``, and run with Uvicorn:
 uvicorn --log-config logging.yaml --factory example:mcp.create_app
 ```
 
-Connect with any AI agent or MCP inspector supporting the latest
-[Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
-transport version.
+Connect with any AI agent or MCP inspector supporting the
+[Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
+transport as of the `2026-07-28` revision of MCP. Earlier protocol revisions
+(the ones relying on the `initialize` handshake and sessions) are not
+supported.
 
 For instance, assuming you have both
-[MCPHost](https://github.com/mark3labs/mcphost) and
-[Ollama](https://ollama.com/) installed on your system, you can run it against
-the previously started server (see above) as:
+[fast-agent](https://github.com/evalstate/fast-agent)
+(`pip install fast-agent-mcp`) and [Ollama](https://ollama.com/) installed on
+your system, you can run it against the previously started server (see above)
+as:
 ```console
-mcphost --config mcphost.yaml -m ollama:granite4:3b --prompt "What is the current temperature in London?"
+fast-agent go --url http://localhost:8000/mcp --model generic.granite4:3b --message "What is the current temperature in London?"
 ```
 
-Omit `--prompt` to run interactively.
+Omit `--message` to run interactively.
 Feel free to `pull` and use a different `ollama` model!
+
+Requests from web browsers (i.e., the ones carrying an `Origin` header) are
+rejected with HTTP 403 unless their origin is explicitly allowed. Optionally,
+the same origins can also be granted access via CORS:
+```python
+mcp = falcon_mcp_server.MCP(allowed_origins=['http://localhost:6274'])
+app = mcp.create_app(cors_enable=True)
+```
 
 ## License
 

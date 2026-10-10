@@ -1,5 +1,6 @@
 """MCP server resources."""
 
+import base64
 import dataclasses
 import os.path
 import urllib.parse
@@ -79,11 +80,14 @@ class Resources:
 
         try:
             data = await resource.fetch()
-            return {
-                'uri': resource.uri,
-                'mimeType': resource.media_type,
-                'text': data,
-            }
+            contents = {'uri': resource.uri, 'mimeType': resource.media_type}
+            # NOTE(vytas): MCP Resources, 8. Security Considerations.
+            #   Binary data MUST be properly encoded.
+            if isinstance(data, bytes):
+                contents['blob'] = base64.b64encode(data).decode()
+            else:
+                contents['text'] = data
+            return contents
         except Exception as ex:
             raise errors.RPCInternalError(
                 f'Error reading resource {uri}: {type(ex).__name__}: {ex}'

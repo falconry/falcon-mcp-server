@@ -21,9 +21,11 @@ class Tool:
             'name': self.name,
             'title': self.title,
             'description': self.description,
+            # NOTE(vytas): MCP Tools, 5.1. Tool.
+            #   inputSchema (...) MUST be a valid JSON Schema object (not
+            #   null).
+            'inputSchema': self.input_schema or {'type': 'object'},
         }
-        if self.input_schema:
-            data['inputSchema'] = self.input_schema
         return data
 
 
@@ -42,10 +44,10 @@ class Tools:
         description: str | None = None,
         input_schema: dict[Any, Any] | None = None,
     ) -> None:
-        if name is self._tools:
+        name = name or tool.__name__
+        if name in self._tools:
             raise ValueError(f'Tool with the {name=} is already registered.')
 
-        name = name or tool.__name__
         title = title or name
         description = description or tool.__doc__ or name
 
@@ -62,11 +64,16 @@ class Tools:
         start = 0
 
         if cursor is not None:
-            if cursor.startswith('tools'):
-                _, _, offset = cursor.partition('tools')
-                start = int(offset)
-                if start >= len(self._tool_list):
-                    raise errors.RPCInvalidParam('Invalid cursor')
+            # NOTE(vytas): MCP Pagination, 7. Error Handling.
+            #   Invalid cursors SHOULD result in an error with code -32602
+            #   (Invalid params).
+            prefix, _, offset = str(cursor).partition('tools')
+            if (
+                prefix
+                or not offset.isdecimal()
+                or (start := int(offset)) >= len(self._tool_list)
+            ):
+                raise errors.RPCInvalidParam('Invalid cursor')
 
         end = start + self.MAX_PAGE_SIZE
         tools = []

@@ -2,27 +2,35 @@
 
 from collections.abc import Awaitable
 from collections.abc import Callable
+from collections.abc import Iterable
 from typing import Any
 
 import falcon.asgi
 
 from falcon_mcp_server.server.server import RPCServer
-from falcon_mcp_server.session.storage import SessionStorage
 from falcon_mcp_server.transport.streamablehttp import StreamableHTTP
 
 
 class MCP:
-    """Falcon MCP end point resource."""
+    """Falcon MCP end point resource.
 
-    def __init__(self) -> None:
+    Args:
+        allowed_origins: Origin(s) that web browsers are allowed to send
+            requests from, or ``'*'`` to allow any origin. Requests carrying
+            any other ``Origin`` header are rejected with HTTP 403 Forbidden
+            (default: no origins are allowed).
+    """
+
+    def __init__(self, allowed_origins: str | Iterable[str] = ()) -> None:
+        if not isinstance(allowed_origins, str):
+            allowed_origins = tuple(allowed_origins)
+        self._allowed_origins = allowed_origins
+
         self._rpc_server = RPCServer()
-        self._session_storage = SessionStorage()
         self._streamable_http = StreamableHTTP(
-            self._rpc_server, self._session_storage
+            self._rpc_server, allowed_origins=allowed_origins
         )
 
-        self.on_delete = self._streamable_http.on_delete
-        self.on_get = self._streamable_http.on_get
         self.on_post = self._streamable_http.on_post
 
     # TODO: add_prompt(...)
@@ -61,7 +69,20 @@ class MCP:
             input_schema=input_schema,
         )
 
-    def create_app(self) -> falcon.asgi.App:
-        app = falcon.asgi.App()
+    def create_app(self, cors_enable: bool = False) -> falcon.asgi.App:
+        """Create a Falcon app serving this MCP end point at ``/mcp``.
+
+        Args:
+            cors_enable: Set to ``True`` to add :class:`falcon.CORSMiddleware`
+                letting web frontends served from the allowed origins access
+                the end point (default ``False``).
+        """
+        middleware = []
+        if cors_enable:
+            middleware.append(
+                falcon.CORSMiddleware(allow_origins=self._allowed_origins)
+            )
+
+        app = falcon.asgi.App(middleware=middleware)
         app.add_route('/mcp', self)
         return app
