@@ -12,6 +12,7 @@ HEADER_MISMATCH = -32020
 UNSUPPORTED_PROTOCOL_VERSION = -32022
 METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
+INTERNAL_ERROR = -32603
 
 ORIGIN = 'https://app.example'
 
@@ -66,7 +67,7 @@ def test_discover(client):
     assert result == {
         'resultType': 'complete',
         'supportedVersions': [VERSION],
-        'capabilities': {'resources': {}, 'tools': {}},
+        'capabilities': {'prompts': {}, 'resources': {}, 'tools': {}},
         'ttlMs': 0,
         'cacheScope': 'private',
     }
@@ -240,6 +241,159 @@ def test_invalid_cursor(client, cursor):
     assert resp.json['error']['code'] == INVALID_PARAMS
 
 
+def test_prompts_list(client):
+    resp = rpc(client, 'prompts/list')
+    assert resp.status_code == 200
+
+    result = resp.json['result']
+    assert result['resultType'] == 'complete'
+    assert result['ttlMs'] == 0
+    assert result['cacheScope'] == 'private'
+    assert result['prompts'] == [
+        {
+            'name': 'summarize',
+            'title': 'summarize',
+            'description': 'Ask for a summary of a topic.',
+            'arguments': [
+                {'name': 'topic', 'required': True},
+                {'name': 'style', 'required': False},
+            ],
+        }
+    ]
+
+
+def test_prompts_get(client):
+    resp = rpc(
+        client,
+        'prompts/get',
+        {'name': 'summarize', 'arguments': {'topic': 'MCP', 'style': 'long'}},
+    )
+    assert resp.status_code == 200
+
+    result = resp.json['result']
+    assert result['resultType'] == 'complete'
+    assert result['description'] == 'Ask for a summary of a topic.'
+    assert result['messages'] == [
+        {
+            'role': 'user',
+            'content': {
+                'type': 'text',
+                'text': 'Write a long summary of MCP.',
+            },
+        }
+    ]
+    assert 'ttlMs' not in result
+
+
+def test_prompts_get_default_argument(client):
+    resp = rpc(
+        client,
+        'prompts/get',
+        {'name': 'summarize', 'arguments': {'topic': 'X'}},
+    )
+    assert resp.status_code == 200
+    content = resp.json['result']['messages'][0]['content']
+    assert content['text'] == 'Write a brief summary of X.'
+
+
+@pytest.mark.parametrize(
+    'arguments',
+    [
+        None,
+        {},
+        {'style': 'long'},
+        {'topic': 'MCP', 'tone': 'formal'},
+        {'topic': 1337},
+        ['MCP'],
+    ],
+)
+def test_prompts_get_invalid_arguments(client, arguments):
+    params = {'name': 'summarize'}
+    if arguments is not None:
+        params['arguments'] = arguments
+
+    resp = rpc(client, 'prompts/get', params)
+    assert resp.status_code == 400
+    assert resp.json['error']['code'] == INVALID_PARAMS
+
+
+async def dialogue(**kwargs) -> list:
+    return [
+        {'role': 'user', 'content': {'type': 'text', 'text': 'Knock knock.'}},
+        {
+            'role': 'assistant',
+            'content': {'type': 'text', 'text': "Who's there?"},
+        },
+    ]
+
+
+def test_prompt_with_messages(client, server):
+    arguments = [{'name': 'mood', 'description': 'Mood of the joke'}]
+    server.add_prompt(
+        dialogue,
+        title='Knock-knock joke',
+        description='Start a joke.',
+        arguments=arguments,
+    )
+
+    resp = rpc(client, 'prompts/list')
+    assert resp.status_code == 200
+    assert resp.json['result']['prompts'][-1] == {
+        'name': 'dialogue',
+        'title': 'Knock-knock joke',
+        'description': 'Start a joke.',
+        'arguments': arguments,
+    }
+
+    resp = rpc(
+        client,
+        'prompts/get',
+        {'name': 'dialogue', 'arguments': {'mood': 'dry'}},
+    )
+    assert resp.status_code == 200
+    roles = [message['role'] for message in resp.json['result']['messages']]
+    assert roles == ['user', 'assistant']
+
+
+async def broken() -> str:
+    raise RuntimeError('out of ideas')
+
+
+def test_prompt_error(client, server):
+    server.add_prompt(broken)
+
+    resp = rpc(client, 'prompts/get', {'name': 'broken'})
+    assert resp.status_code == 200
+    assert resp.json['error']['code'] == INTERNAL_ERROR
+    assert 'out of ideas' in resp.json['error']['message']
+
+
+def test_duplicate_prompt(server):
+    with pytest.raises(ValueError):
+        server.add_prompt(dialogue, name='summarize')
+
+
+def test_prompts_pagination(client, server):
+    for index in range(40):
+        server.add_prompt(dialogue, name=f'dialogue{index}')
+
+    resp = rpc(client, 'prompts/list')
+    assert resp.status_code == 200
+    result = resp.json['result']
+    assert len(result['prompts']) == 32
+
+    resp = rpc(client, 'prompts/list', {'cursor': result['nextCursor']})
+    assert resp.status_code == 200
+    result = resp.json['result']
+    assert len(result['prompts']) == 9
+    assert result['prompts'][-1]['name'] == 'dialogue39'
+    assert 'nextCursor' not in result
+
+    resp = rpc(client, 'prompts/list', {'cursor': 'tools0032'})
+    assert resp.status_code == 400
+    assert resp.json['error']['code'] == INVALID_PARAMS
+
+
 def test_binary_resource(client, server):
     uri = 'file:///data.bin'
     server.add_simple_resource(uri, 'application/octet-stream', b'\x00\xff')
@@ -258,6 +412,8 @@ def test_binary_resource(client, server):
         ('tools/call', {}),
         ('resources/read', {'uri': 'file:///nope.txt'}),
         ('resources/read', {}),
+        ('prompts/get', {'name': 'nope'}),
+        ('prompts/get', {}),
     ],
 )
 def test_not_found(client, method, params):
@@ -268,7 +424,8 @@ def test_not_found(client, method, params):
 
 
 @pytest.mark.parametrize(
-    'method', ['initialize', 'logging/setLevel', 'ping', 'prompts/list']
+    'method',
+    ['completion/complete', 'initialize', 'logging/setLevel', 'ping'],
 )
 def test_method_not_found(client, method):
     resp = rpc(client, method)
@@ -323,6 +480,7 @@ def test_unsupported_protocol_version(client):
             {'Mcp-Name': 'file:///nope.txt'},
             None,
         ),
+        ('prompts/get', {'name': 'summarize'}, {'Mcp-Name': 'nope'}, None),
     ],
 )
 def test_header_mismatch(client, method, params, headers, meta):

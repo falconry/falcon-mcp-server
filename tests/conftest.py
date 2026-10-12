@@ -9,6 +9,11 @@ async def greet(name: str = 'World') -> str:
     return f'Hello, {name}!'
 
 
+async def summarize(topic: str, style: str = 'brief') -> str:
+    """Ask for a summary of a topic."""
+    return f'Write a {style} summary of {topic}.'
+
+
 @pytest.fixture
 def server() -> falcon_mcp_server.MCP:
     mcp = falcon_mcp_server.MCP()
@@ -19,6 +24,7 @@ def server() -> falcon_mcp_server.MCP:
             'properties': {'name': {'type': 'string'}},
         },
     )
+    mcp.add_prompt(summarize)
     mcp.add_simple_resource('file:///hello.txt', 'text/plain', 'Hello!')
     return mcp
 

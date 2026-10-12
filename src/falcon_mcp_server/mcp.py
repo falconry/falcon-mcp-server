@@ -55,7 +55,34 @@ class MCP:
 
         self.on_post = self._streamable_http.on_post
 
-    # TODO: add_prompt(...)
+    def add_prompt(
+        self,
+        prompt: Callable[..., Awaitable[Any]],
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        arguments: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Add a prompt template rendered by an async callable.
+
+        The callable receives the prompt arguments (strings) as keyword
+        arguments, and returns the text of a single user message, or a list
+        of MCP prompt messages.
+
+        Args:
+            prompt: Async callable rendering the prompt.
+            name: Name of the prompt (default: the callable's name).
+            title: Human-readable name of the prompt for display purposes.
+            description: Description (default: the callable's docstring).
+            arguments: MCP argument definitions (default: from the signature).
+        """
+        self._rpc_server.prompts.add_prompt(
+            prompt,
+            name=name,
+            title=title,
+            description=description,
+            arguments=arguments,
+        )
 
     def add_simple_resource(
         self,

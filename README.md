@@ -26,7 +26,8 @@ pip install git+https://github.com/falconry/falcon-mcp-server
 
 ## Example Usage
 
-See the example in ``example/example.py``.
+See the example in ``example/example.py``, which exposes a tool, a prompt
+and a resource.
 
 Change dir to ``example/``, and run with Uvicorn:
 ```console

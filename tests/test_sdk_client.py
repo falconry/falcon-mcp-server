@@ -46,6 +46,19 @@ async def test_sdk_client(app, mode):
         result = await client.read_resource('file:///hello.txt')
         assert result.contents[0].text == 'Hello!'
 
+        prompts = await client.list_prompts()
+        assert [prompt.name for prompt in prompts.prompts] == ['summarize']
+        assert [arg.name for arg in prompts.prompts[0].arguments] == [
+            'topic',
+            'style',
+        ]
+
+        result = await client.get_prompt('summarize', {'topic': 'the SDK'})
+        assert result.messages[0].role == 'user'
+        assert result.messages[0].content.text == (
+            'Write a brief summary of the SDK.'
+        )
+
         with pytest.raises(mcp.MCPError) as excinfo:
             await client.call_tool('nope')
         assert excinfo.value.code == -32602

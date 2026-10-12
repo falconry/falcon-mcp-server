@@ -23,6 +23,22 @@ async def get_temperature(city: str) -> str:
     return f'The current temperature in {city} is {temperature}.'
 
 
+async def compare_temperatures(city: str, other_city: str = 'London') -> str:
+    """Ask which of two cities is currently warmer.
+
+    Args:
+        city (str): The name of the first city.
+        other_city (str): The name of the second city (default 'London').
+
+    Returns:
+        The text of the prompt.
+    """
+    return (
+        f'Look up the current temperatures in {city} and {other_city}, and '
+        f'tell me which of the two cities is warmer.'
+    )
+
+
 mcp = falcon_mcp_server.MCP(
     name='weather-example',
     title='Weather Example',
@@ -41,6 +57,20 @@ mcp.add_tool(
         },
         'required': ['city'],
     },
+)
+
+mcp.add_prompt(
+    compare_temperatures,
+    title='Compare the temperature in two cities',
+    description='Ask which of two cities is currently warmer.',
+    arguments=[
+        {
+            'name': 'city',
+            'description': 'name of the first city',
+            'required': True,
+        },
+        {'name': 'other_city', 'description': 'name of the second city'},
+    ],
 )
 
 mcp.add_simple_resource(

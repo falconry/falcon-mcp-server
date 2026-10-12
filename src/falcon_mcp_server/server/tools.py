@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from falcon_mcp_server import errors
+from falcon_mcp_server.server.pagination import paginate
 
 
 @dataclasses.dataclass
@@ -62,28 +63,14 @@ class Tools:
         self._tool_list.append(name)
 
     async def list_tools(self, cursor: str | None = None) -> dict[str, Any]:
-        start = 0
+        names, next_cursor = paginate(
+            self._tool_list, cursor, 'tools', self.MAX_PAGE_SIZE
+        )
 
-        if cursor is not None:
-            # NOTE(vytas): MCP Pagination, 7. Error Handling.
-            #   Invalid cursors SHOULD result in an error with code -32602
-            #   (Invalid params).
-            prefix, _, offset = str(cursor).partition('tools')
-            if (
-                prefix
-                or not offset.isdecimal()
-                or (start := int(offset)) >= len(self._tool_list)
-            ):
-                raise errors.RPCInvalidParam('Invalid cursor')
-
-        end = start + self.MAX_PAGE_SIZE
-        tools = []
-        for name in self._tool_list[start:end]:
-            tools.append(self._tools[name].marshal())
-
+        tools = [self._tools[name].marshal() for name in names]
         result: dict[str, Any] = {'tools': tools}
-        if end < len(self._tool_list):
-            result['nextCursor'] = f'tools{end:04d}'
+        if next_cursor is not None:
+            result['nextCursor'] = next_cursor
 
         return result
 

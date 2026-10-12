@@ -12,6 +12,7 @@ from falcon_mcp_server.constants import META_SERVER_INFO
 from falcon_mcp_server.constants import PROJECT_URL
 from falcon_mcp_server.constants import SUPPORTED_MCP_PROTOCOL_VERSIONS
 from falcon_mcp_server.logger import log
+from falcon_mcp_server.server.prompts import Prompts
 from falcon_mcp_server.server.resources import Resources
 from falcon_mcp_server.server.tools import Tools
 
@@ -46,12 +47,16 @@ class RPCServer:
         version: str = '1.0.0',
         instructions: str | None = None,
     ) -> None:
+        self._prompts: Prompts = Prompts()
         self._resources: Resources = Resources()
         self._tools: Tools = Tools()
 
         self._rpc_api = {
             # Discovery
             'server/discover': self._server_discover,
+            # Prompts
+            'prompts/get': self._prompts_get,
+            'prompts/list': self._prompts_list,
             # Resources
             'resources/list': self._resources_list,
             'resources/read': self._resources_read,
@@ -76,6 +81,10 @@ class RPCServer:
             self._server_info['description'] = description
 
         self._instructions = instructions
+
+    @property
+    def prompts(self) -> Prompts:
+        return self._prompts
 
     @property
     def resources(self) -> Resources:
@@ -183,6 +192,7 @@ class RPCServer:
         result: dict[str, Any] = {
             'supportedVersions': sorted(SUPPORTED_MCP_PROTOCOL_VERSIONS),
             'capabilities': {
+                'prompts': {},
                 'resources': {},
                 'tools': {},
             },
@@ -194,6 +204,18 @@ class RPCServer:
         if self._instructions is not None:
             result['instructions'] = self._instructions
         return result
+
+    async def _prompts_get(self, params: dict[str, Any]) -> dict[str, Any]:
+        name = _get_str(params, 'name')
+        arguments = params.get('arguments') or {}
+
+        return await self._prompts.get_prompt(name, arguments)
+
+    async def _prompts_list(self, params: dict[str, Any]) -> dict[str, Any]:
+        cursor = params.get('cursor')
+
+        result = await self._prompts.list_prompts(cursor=cursor)
+        return {**result, **CACHE_HINTS}
 
     async def _resources_list(self, params: dict[str, Any]) -> dict[str, Any]:
         result = await self._resources.list_resources()
