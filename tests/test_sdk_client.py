@@ -2,6 +2,8 @@
 
 import pytest
 
+import falcon_mcp_server
+
 httpx2 = pytest.importorskip('httpx2')
 mcp = pytest.importorskip('mcp')
 
@@ -13,17 +15,20 @@ def anyio_backend():
     return 'asyncio'
 
 
+def connect(app, mode='auto'):
+    http_client = httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app))
+    transport = streamable_http_client(
+        'http://localhost/mcp', http_client=http_client
+    )
+    return mcp.Client(transport, mode=mode)
+
+
 # NOTE(vytas): "auto" probes the server via server/discover first, whereas a
 #   pinned protocol version skips straight to the actual requests.
 @pytest.mark.anyio
 @pytest.mark.parametrize('mode', ['auto', '2026-07-28'])
 async def test_sdk_client(app, mode):
-    http_client = httpx2.AsyncClient(transport=httpx2.ASGITransport(app=app))
-    transport = streamable_http_client(
-        'http://localhost/mcp', http_client=http_client
-    )
-
-    async with mcp.Client(transport, mode=mode) as client:
+    async with connect(app, mode) as client:
         assert client.protocol_version == '2026-07-28'
 
         tools = await client.list_tools()
@@ -44,3 +49,19 @@ async def test_sdk_client(app, mode):
         with pytest.raises(mcp.MCPError) as excinfo:
             await client.call_tool('nope')
         assert excinfo.value.code == -32602
+
+
+@pytest.mark.anyio
+async def test_sdk_client_discovery():
+    server = falcon_mcp_server.MCP(
+        name='acme',
+        title='ACME Tools',
+        version='2.3.4',
+        instructions='Search before fetching.',
+    )
+
+    async with connect(server.create_app()) as client:
+        assert client.server_info.name == 'acme'
+        assert client.server_info.title == 'ACME Tools'
+        assert client.server_info.version == '2.3.4'
+        assert client.instructions == 'Search before fetching.'

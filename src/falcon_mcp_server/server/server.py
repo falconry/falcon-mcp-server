@@ -40,12 +40,11 @@ def _get_str(params: dict[str, Any], name: str) -> str:
 class RPCServer:
     def __init__(
         self,
-        name: str = 'falcon-mcp-server',
-        title: str = 'Falcon MCP Server project',
-        description: str = (
-            f'MCP server using falcon-mcp-server: {PROJECT_URL}'
-        ),
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
         version: str = '1.0.0',
+        instructions: str | None = None,
     ) -> None:
         self._resources: Resources = Resources()
         self._tools: Tools = Tools()
@@ -61,12 +60,22 @@ class RPCServer:
             'tools/list': self._tools_list,
         }
 
-        self._server_info = {
-            'name': name,
-            'title': title,
-            'version': version,
-            'description': description,
-        }
+        # NOTE(vytas): The default title and description are about this
+        #   project, so they would only mislead next to a custom name.
+        if name is None:
+            name = 'falcon-mcp-server'
+            title = title or 'Falcon MCP Server project'
+            description = description or (
+                f'MCP server using falcon-mcp-server: {PROJECT_URL}'
+            )
+
+        self._server_info = {'name': name, 'version': version}
+        if title is not None:
+            self._server_info['title'] = title
+        if description is not None:
+            self._server_info['description'] = description
+
+        self._instructions = instructions
 
     @property
     def resources(self) -> Resources:
@@ -171,7 +180,7 @@ class RPCServer:
         return rpc_resp
 
     async def _server_discover(self, params: dict[str, Any]) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             'supportedVersions': sorted(SUPPORTED_MCP_PROTOCOL_VERSIONS),
             'capabilities': {
                 'resources': {},
@@ -179,6 +188,12 @@ class RPCServer:
             },
             **CACHE_HINTS,
         }
+        # NOTE(vytas): MCP Discovery, 4.1. DiscoverResult.
+        #   instructions: Optional natural-language guidance for LLMs on how
+        #   to use this server effectively.
+        if self._instructions is not None:
+            result['instructions'] = self._instructions
+        return result
 
     async def _resources_list(self, params: dict[str, Any]) -> dict[str, Any]:
         result = await self._resources.list_resources()

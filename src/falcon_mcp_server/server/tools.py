@@ -1,6 +1,7 @@
 """MCP tools."""
 
 import dataclasses
+import inspect
 from collections.abc import Awaitable
 from collections.abc import Callable
 from typing import Any
@@ -49,7 +50,7 @@ class Tools:
             raise ValueError(f'Tool with the {name=} is already registered.')
 
         title = title or name
-        description = description or tool.__doc__ or name
+        description = description or inspect.getdoc(tool) or name
 
         self._tools[name] = Tool(
             tool,

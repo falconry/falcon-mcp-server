@@ -58,13 +58,54 @@ def test_discover(client):
     assert resp.json['id'] == 1337
 
     result = resp.json['result']
-    assert result.pop('_meta')[META_SERVER_INFO]['name'] == 'falcon-mcp-server'
+    server_info = result.pop('_meta')[META_SERVER_INFO]
+    assert server_info['name'] == 'falcon-mcp-server'
+    assert server_info['version'] == '1.0.0'
+    assert server_info['title']
+    assert 'falcon-mcp-server' in server_info['description']
     assert result == {
         'resultType': 'complete',
         'supportedVersions': [VERSION],
         'capabilities': {'resources': {}, 'tools': {}},
         'ttlMs': 0,
         'cacheScope': 'private',
+    }
+
+
+def test_custom_identity():
+    server_info = {
+        'name': 'acme',
+        'title': 'ACME Tools',
+        'description': 'Tools for the ACME Corporation.',
+        'version': '2.3.4',
+    }
+    mcp = falcon_mcp_server.MCP(
+        instructions='Search before fetching.', **server_info
+    )
+    client = falcon.testing.TestClient(mcp.create_app())
+
+    resp = rpc(client, 'server/discover')
+    assert resp.status_code == 200
+    result = resp.json['result']
+    assert result['instructions'] == 'Search before fetching.'
+    assert result['_meta'][META_SERVER_INFO] == server_info
+
+    resp = rpc(client, 'tools/list')
+    assert resp.status_code == 200
+    result = resp.json['result']
+    assert 'instructions' not in result
+    assert result['_meta'][META_SERVER_INFO] == server_info
+
+
+def test_custom_name_only():
+    mcp = falcon_mcp_server.MCP(name='acme')
+    client = falcon.testing.TestClient(mcp.create_app())
+
+    resp = rpc(client, 'server/discover')
+    assert resp.status_code == 200
+    assert resp.json['result']['_meta'][META_SERVER_INFO] == {
+        'name': 'acme',
+        'version': '1.0.0',
     }
 
 
@@ -143,6 +184,34 @@ def test_tool_without_input_schema(client, server):
         for tool in resp.json['result']['tools']
     }
     assert schemas['ping'] == {'type': 'object'}
+
+
+async def forecast(city: str) -> str:
+    """Get the weather forecast for a city.
+
+    Args:
+        city: The name of the city.
+    """
+    return f'It is always sunny in {city}.'
+
+
+def test_tool_description(client, server):
+    server.add_tool(forecast)
+    server.add_tool(forecast, name='verbatim', description='  As given.\n')
+
+    resp = rpc(client, 'tools/list')
+    assert resp.status_code == 200
+    descriptions = {
+        tool['name']: tool['description']
+        for tool in resp.json['result']['tools']
+    }
+    assert descriptions['forecast'] == (
+        'Get the weather forecast for a city.\n'
+        '\n'
+        'Args:\n'
+        '    city: The name of the city.'
+    )
+    assert descriptions['verbatim'] == '  As given.\n'
 
 
 def test_tools_pagination(client, server):

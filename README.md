@@ -51,6 +51,17 @@ fast-agent go --url http://localhost:8000/mcp --model generic.granite4:3b --mess
 Omit `--message` to run interactively.
 Feel free to `pull` and use a different `ollama` model!
 
+The server can introduce itself to clients under your own name, and provide
+instructions that clients may pass on to the LLM alongside the tools:
+```python
+mcp = falcon_mcp_server.MCP(
+    name='weather-example',
+    title='Weather Example',
+    version='1.2.3',
+    instructions='Temperatures are only known for New York and London.',
+)
+```
+
 Requests from web browsers (i.e., the ones carrying an `Origin` header) are
 rejected with HTTP 403 unless their origin is explicitly allowed. Optionally,
 the same origins can also be granted access via CORS:

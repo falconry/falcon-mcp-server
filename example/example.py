@@ -23,11 +23,17 @@ async def get_temperature(city: str) -> str:
     return f'The current temperature in {city} is {temperature}.'
 
 
-mcp = falcon_mcp_server.MCP()
+mcp = falcon_mcp_server.MCP(
+    name='weather-example',
+    title='Weather Example',
+    description='Example MCP server providing made-up weather information.',
+    instructions='Temperatures are only known for New York and London.',
+)
 
 mcp.add_tool(
     get_temperature,
     title='City weather information provider',
+    description='Get the current temperature for a city.',
     input_schema={
         'type': 'object',
         'properties': {
