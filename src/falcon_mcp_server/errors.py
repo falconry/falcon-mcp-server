@@ -3,6 +3,18 @@ from typing import Any
 from falcon_mcp_server.constants import SUPPORTED_MCP_PROTOCOL_VERSIONS
 
 
+class ToolError(Exception):
+    """Tool execution error that the model can act upon.
+
+    Raise it from a tool to report, e.g., invalid input or a failed upstream
+    request. Unlike the details of any other exception, the message is sent
+    to the client, which normally passes it on to the model.
+
+    Args:
+        message: Description of the error, and ideally of how to recover.
+    """
+
+
 class RPCError(Exception):
     code = -32603
 

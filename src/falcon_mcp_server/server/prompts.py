@@ -6,7 +6,13 @@ from collections.abc import Awaitable
 from collections.abc import Callable
 from typing import Any
 
+import falcon
+
 from falcon_mcp_server import errors
+from falcon_mcp_server.context import Context
+from falcon_mcp_server.logger import log
+from falcon_mcp_server.server.introspection import find_context_param
+from falcon_mcp_server.server.introspection import get_signature
 from falcon_mcp_server.server.pagination import paginate
 
 
@@ -17,6 +23,7 @@ class Prompt:
     title: str
     description: str
     arguments: list[dict[str, Any]]
+    context_param: str | None = None
 
     def marshal(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -37,12 +44,15 @@ class Prompts:
 
     @staticmethod
     def _derive_arguments(
-        prompt: Callable[..., Awaitable[Any]],
+        prompt: Callable[..., Awaitable[Any]], context_param: str | None
     ) -> list[dict[str, Any]]:
         """Describe the named parameters of prompt as prompt arguments."""
         arguments = []
-        for param in inspect.signature(prompt).parameters.values():
-            if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
+        for param in get_signature(prompt).parameters.values():
+            if (
+                param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD)
+                or param.name == context_param
+            ):
                 continue
             arguments.append(
                 {'name': param.name, 'required': param.default is param.empty}
@@ -63,8 +73,9 @@ class Prompts:
 
         title = title or name
         description = description or inspect.getdoc(prompt) or name
+        context_param = find_context_param(prompt)
         if arguments is None:
-            arguments = self._derive_arguments(prompt)
+            arguments = self._derive_arguments(prompt, context_param)
 
         self._prompts[name] = Prompt(
             prompt,
@@ -72,6 +83,7 @@ class Prompts:
             title=title,
             description=description,
             arguments=arguments,
+            context_param=context_param,
         )
         self._prompt_list.append(name)
 
@@ -87,7 +99,9 @@ class Prompts:
 
         return result
 
-    async def get_prompt(self, name: str, arguments: Any) -> dict[str, Any]:
+    async def get_prompt(
+        self, context: Context, name: str, arguments: Any
+    ) -> dict[str, Any]:
         # NOTE(vytas): MCP Prompts, 6. Error Handling.
         #   Servers SHOULD return standard JSON-RPC errors for common failure
         #   cases:
@@ -122,12 +136,19 @@ class Prompts:
                 f'Missing required prompt argument(s): {", ".join(missing)}'
             )
 
+        if prompt.context_param is not None:
+            arguments = {**arguments, prompt.context_param: context}
+
         try:
             messages = await prompt.method(**arguments)
-        except Exception as ex:
-            raise errors.RPCInternalError(
-                f'Error getting prompt {name}: {type(ex).__name__}: {ex}'
-            )
+        except (errors.RPCError, falcon.HTTPError):
+            # NOTE(vytas): These are assumed to be raised intentionally.
+            raise
+        except Exception:
+            # NOTE(vytas): The details of an unexpected exception may be
+            #   sensitive, so they are logged, but not sent to the client.
+            log.exception(f'Error getting prompt {name}')
+            raise errors.RPCInternalError(f'Error getting prompt {name}')
 
         if isinstance(messages, str):
             messages = [

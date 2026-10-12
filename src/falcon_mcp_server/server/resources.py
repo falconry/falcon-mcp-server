@@ -8,7 +8,10 @@ from collections.abc import Awaitable
 from collections.abc import Callable
 from typing import Any
 
+import falcon
+
 from falcon_mcp_server import errors
+from falcon_mcp_server.logger import log
 
 
 @dataclasses.dataclass
@@ -88,7 +91,11 @@ class Resources:
             else:
                 contents['text'] = data
             return contents
-        except Exception as ex:
-            raise errors.RPCInternalError(
-                f'Error reading resource {uri}: {type(ex).__name__}: {ex}'
-            )
+        except (errors.RPCError, falcon.HTTPError):
+            # NOTE(vytas): These are assumed to be raised intentionally.
+            raise
+        except Exception:
+            # NOTE(vytas): The details of an unexpected exception may be
+            #   sensitive, so they are logged, but not sent to the client.
+            log.exception(f'Error reading resource {uri}')
+            raise errors.RPCInternalError(f'Error reading resource {uri}')

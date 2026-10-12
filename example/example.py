@@ -53,7 +53,13 @@ mcp.add_tool(
     input_schema={
         'type': 'object',
         'properties': {
-            'city': {'type': 'string', 'description': 'name of the city'}
+            'city': {
+                'type': 'string',
+                'description': 'name of the city',
+                # NOTE: Clients mirror the city into the Mcp-Param-City HTTP
+                #   header, e.g., for a load balancer to route requests on.
+                'x-mcp-header': 'City',
+            }
         },
         'required': ['city'],
     },

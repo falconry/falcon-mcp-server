@@ -3,6 +3,7 @@
 import pytest
 
 import falcon_mcp_server
+from falcon_mcp_server import Context
 
 httpx2 = pytest.importorskip('httpx2')
 mcp = pytest.importorskip('mcp')
@@ -62,6 +63,75 @@ async def test_sdk_client(app, mode):
         with pytest.raises(mcp.MCPError) as excinfo:
             await client.call_tool('nope')
         assert excinfo.value.code == -32602
+
+
+async def lookup(city: str) -> str:
+    raise falcon_mcp_server.ToolError(f'Unknown city: {city}')
+
+
+@pytest.mark.anyio
+async def test_sdk_client_tool_error():
+    server = falcon_mcp_server.MCP()
+    server.add_tool(lookup)
+
+    async with connect(server.create_app()) as client:
+        result = await client.call_tool('lookup', {'city': 'Atlantis'})
+        assert result.is_error
+        assert result.content[0].text == 'Unknown city: Atlantis'
+
+
+LOCATE_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'region': {'type': 'string', 'x-mcp-header': 'Region'},
+        'limit': {'type': 'integer', 'x-mcp-header': 'Limit'},
+        'exact': {'type': 'boolean', 'x-mcp-header': 'Exact'},
+        'filter': {
+            'type': 'object',
+            'properties': {
+                'owner': {'type': 'string', 'x-mcp-header': 'Owner'},
+            },
+        },
+    },
+}
+
+
+async def locate(context: Context, **kwargs) -> str:
+    """Echo the headers that the client mirrored the arguments into."""
+    names = ('Region', 'Limit', 'Exact', 'Owner')
+    headers = (context.req.get_header(f'Mcp-Param-{name}') for name in names)
+    return ' '.join(header or '-' for header in headers)
+
+
+# NOTE(vytas): The server rejects the calls where the headers do not mirror
+#   the arguments, so a result also means that the client got them right.
+@pytest.mark.anyio
+@pytest.mark.parametrize('list_tools', [True, False])
+async def test_sdk_client_param_headers(list_tools):
+    server = falcon_mcp_server.MCP()
+    server.add_tool(locate, input_schema=LOCATE_SCHEMA)
+
+    async with connect(server.create_app()) as client:
+        if list_tools:
+            await client.list_tools()
+
+        result = await client.call_tool(
+            'locate', {'region': 'us-west1', 'limit': 5, 'exact': True}
+        )
+        assert result.content[0].text == 'us-west1 5 true -'
+
+        result = await client.call_tool(
+            'locate', {'region': 'Malm\xf6', 'filter': {'owner': 'me'}}
+        )
+        assert result.content[0].text == '=?base64?TWFsbcO2?= - - me'
+
+        result = await client.call_tool(
+            'locate', {'region': None, 'limit': 0, 'exact': False}
+        )
+        assert result.content[0].text == '- 0 false -'
+
+        result = await client.call_tool('locate', {})
+        assert result.content[0].text == '- - - -'
 
 
 @pytest.mark.anyio

@@ -11,9 +11,11 @@ from falcon_mcp_server.constants import META_PROTOCOL_VERSION
 from falcon_mcp_server.constants import META_SERVER_INFO
 from falcon_mcp_server.constants import PROJECT_URL
 from falcon_mcp_server.constants import SUPPORTED_MCP_PROTOCOL_VERSIONS
+from falcon_mcp_server.context import Context
 from falcon_mcp_server.logger import log
 from falcon_mcp_server.server.prompts import Prompts
 from falcon_mcp_server.server.resources import Resources
+from falcon_mcp_server.server.tools import ToolFilter
 from falcon_mcp_server.server.tools import Tools
 
 try:
@@ -46,10 +48,11 @@ class RPCServer:
         description: str | None = None,
         version: str = '1.0.0',
         instructions: str | None = None,
+        tool_filter: ToolFilter | None = None,
     ) -> None:
         self._prompts: Prompts = Prompts()
         self._resources: Resources = Resources()
-        self._tools: Tools = Tools()
+        self._tools: Tools = Tools(tool_filter)
 
         self._rpc_api = {
             # Discovery
@@ -130,7 +133,9 @@ class RPCServer:
         ):
             raise errors.RPCUnsupportedProtocolVersion(str(version))
 
-    async def handle(self, rpc_req: dict[str, Any]) -> dict[str, Any] | None:
+    async def handle(
+        self, rpc_req: dict[str, Any], context: Context
+    ) -> dict[str, Any] | None:
         # NOTE(vytas): MCP Overview, 1. Messages.
         #   All messages between MCP clients and servers MUST follow the
         #   JSON-RPC 2.0 specification.
@@ -168,7 +173,7 @@ class RPCServer:
         if (method := self._rpc_api.get(method_name)) is None:
             raise errors.RPCMethodNotFound(f'Method not found: {method_name}')
 
-        result = await method(params)
+        result = await method(params, context)
 
         # NOTE(vytas): MCP Overview, 1.2.1. Result Responses.
         #   The result MUST include a resultType field to indicate the type of
@@ -188,7 +193,9 @@ class RPCServer:
 
         return rpc_resp
 
-    async def _server_discover(self, params: dict[str, Any]) -> dict[str, Any]:
+    async def _server_discover(
+        self, params: dict[str, Any], context: Context
+    ) -> dict[str, Any]:
         result: dict[str, Any] = {
             'supportedVersions': sorted(SUPPORTED_MCP_PROTOCOL_VERSIONS),
             'capabilities': {
@@ -205,32 +212,51 @@ class RPCServer:
             result['instructions'] = self._instructions
         return result
 
-    async def _prompts_get(self, params: dict[str, Any]) -> dict[str, Any]:
+    async def _prompts_get(
+        self, params: dict[str, Any], context: Context
+    ) -> dict[str, Any]:
         name = _get_str(params, 'name')
         arguments = params.get('arguments') or {}
 
-        return await self._prompts.get_prompt(name, arguments)
+        return await self._prompts.get_prompt(context, name, arguments)
 
-    async def _prompts_list(self, params: dict[str, Any]) -> dict[str, Any]:
+    async def _prompts_list(
+        self, params: dict[str, Any], context: Context
+    ) -> dict[str, Any]:
         cursor = params.get('cursor')
 
         result = await self._prompts.list_prompts(cursor=cursor)
         return {**result, **CACHE_HINTS}
 
-    async def _resources_list(self, params: dict[str, Any]) -> dict[str, Any]:
+    async def _resources_list(
+        self, params: dict[str, Any], context: Context
+    ) -> dict[str, Any]:
         result = await self._resources.list_resources()
         return {**result, **CACHE_HINTS}
 
-    async def _resources_read(self, params: dict[str, Any]) -> dict[str, Any]:
+    async def _resources_read(
+        self, params: dict[str, Any], context: Context
+    ) -> dict[str, Any]:
         uri = _get_str(params, 'uri')
         resource = await self._resources.read_resource(uri)
         return {'contents': [resource], **CACHE_HINTS}
 
-    async def _tools_call(self, params: dict[str, Any]) -> dict[str, Any]:
+    async def _tools_call(
+        self, params: dict[str, Any], context: Context
+    ) -> dict[str, Any]:
         name = _get_str(params, 'name')
         arguments = params.get('arguments') or {}
 
-        result = await self._tools.call_tool(name, arguments)
+        try:
+            result = await self._tools.call_tool(context, name, arguments)
+        except errors.ToolError as ex:
+            # NOTE(vytas): MCP Tools, 7. Error Handling.
+            #   Tool Execution Errors (...) are reported in tool results with
+            #   isError: true.
+            return {
+                'content': [{'type': 'text', 'text': str(ex)}],
+                'isError': True,
+            }
 
         if isinstance(result, str):
             return {
@@ -262,8 +288,10 @@ class RPCServer:
             ],
         }
 
-    async def _tools_list(self, params: dict[str, Any]) -> dict[str, Any]:
+    async def _tools_list(
+        self, params: dict[str, Any], context: Context
+    ) -> dict[str, Any]:
         cursor = params.get('cursor')
 
-        result = await self._tools.list_tools(cursor=cursor)
+        result = await self._tools.list_tools(context, cursor=cursor)
         return {**result, **CACHE_HINTS}

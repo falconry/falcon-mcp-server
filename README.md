@@ -63,6 +63,72 @@ mcp = falcon_mcp_server.MCP(
 )
 ```
 
+A tool or prompt receives the context of the request via the parameter that it
+annotates with `Context`, if any. The context carries the Falcon request and,
+if you add the end point to your app on a templated route, the values of its
+fields:
+```python
+import falcon.asgi
+
+from falcon_mcp_server import Context
+
+
+async def get_quota(context: Context) -> str:
+    account = context.path_params['account']
+    token = context.req.auth
+    ...
+
+
+mcp.add_tool(get_quota, annotations={'readOnlyHint': True})
+
+app = falcon.asgi.App()
+app.add_route('/{account:int}/mcp', mcp)
+```
+
+The tools exposed to a request can be narrowed down with a filter. A tool that
+is filtered out is neither listed nor callable:
+```python
+def tool_filter(context, tool):
+    if context.req.get_param_as_bool('read_only'):
+        return bool(tool.annotations.get('readOnlyHint'))
+    return True
+
+
+mcp = falcon_mcp_server.MCP(tool_filter=tool_filter)
+```
+
+A tool argument can be mirrored into an HTTP header, e.g., for a reverse proxy
+to log or route on without parsing the request body. Annotate the argument
+with `x-mcp-header` in the input schema, as the example does for `city`, and
+clients send its value in the `Mcp-Param-City` header; a call where the header
+and the argument disagree is rejected:
+```python
+mcp.add_tool(
+    get_temperature,
+    input_schema={
+        'type': 'object',
+        'properties': {
+            'city': {'type': 'string', 'x-mcp-header': 'City'},
+        },
+        'required': ['city'],
+    },
+)
+```
+
+An exception raised by a tool is logged, and reported to the client as an
+internal error without any details. The exceptions are Falcon's HTTP errors,
+such as `falcon.HTTPUnauthorized`, which are rendered as usual. To tell the
+model what went wrong, so that it can correct itself, raise `ToolError`:
+```python
+from falcon_mcp_server import ToolError
+
+
+async def get_temperature(city: str) -> str:
+    if city not in temperatures:
+        raise ToolError(f'Unknown city; try one of: {", ".join(temperatures)}')
+    ...
+```
+
 Requests from web browsers (i.e., the ones carrying an `Origin` header) are
 rejected with HTTP 403 unless their origin is explicitly allowed. Optionally,
 the same origins can also be granted access via CORS:

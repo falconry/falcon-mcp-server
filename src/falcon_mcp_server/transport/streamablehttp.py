@@ -7,6 +7,7 @@ See also: https://modelcontextprotocol.io/specification/2026-07-28/basic/transpo
 """
 
 import base64
+import re
 from collections.abc import Iterable
 from typing import Any
 
@@ -18,6 +19,7 @@ from falcon_mcp_server import errors
 from falcon_mcp_server.constants import CONTENT_EVENT_STREAM
 from falcon_mcp_server.constants import META_PROTOCOL_VERSION
 from falcon_mcp_server.constants import SUPPORTED_MCP_PROTOCOL_VERSIONS
+from falcon_mcp_server.context import Context
 from falcon_mcp_server.server.server import RPCServer
 
 # NOTE(vytas): MCP Streamable HTTP, 6.2. Standard Request Headers.
@@ -37,6 +39,13 @@ _ERROR_STATUS = {
     errors.RPCMethodNotFound.code: falcon.HTTP_404,
     errors.RPCUnsupportedProtocolVersion.code: falcon.HTTP_400,
 }
+
+
+# NOTE(vytas): MCP Streamable HTTP, 6.3.2. Value Encoding.
+#   HTTP header field values must consist of visible ASCII characters
+#   (0x21-0x7E), space (0x20), and horizontal tab (0x09).
+_HEADER_VALUE = re.compile(r'[\t\x20-\x7e]*')
+_INTEGER = re.compile(r'-?[0-9]+(\.0+)?')
 
 
 def _get(obj: Any, key: str) -> Any:
@@ -81,7 +90,6 @@ class StreamableHTTP:
     #   Servers that process the request body MUST reject requests where the
     #   values specified in the headers do not match the corresponding values
     #   in the request body.
-    # TODO(vytas): Validate Mcp-Param-{Name} against tools' x-mcp-header.
     def _validate_headers(self, req: Request, rpc_req: dict[str, Any]) -> None:
         method = rpc_req.get('method')
         params = rpc_req.get('params')
@@ -128,9 +136,80 @@ class StreamableHTTP:
                 f'match body value {name!r}'
             )
 
+    @staticmethod
+    def _mirrors(header: str | None, value: Any) -> bool:
+        """Tell whether an Mcp-Param-{Name} header mirrors a tool argument."""
+        # NOTE(vytas): MCP Streamable HTTP, 6.3.4. Server Behavior for Custom
+        #   Headers.
+        #   * Parameter value is null: Server MUST NOT expect the header.
+        #   * Parameter not in arguments: Server MUST NOT expect the header.
+        #   * Client omits header but value is in body: Server MUST reject
+        #     the request.
+        if value is None:
+            return header is None
+        # NOTE(vytas): MCP Streamable HTTP, 6.3.4. Server Behavior for Custom
+        #   Headers.
+        #   Servers MUST reject requests with a recognized Mcp-Param-{Name}
+        #   header that contains invalid characters.
+        if header is None or not _HEADER_VALUE.fullmatch(header):
+            return False
+        if (decoded := _decode_header(header)) is None:
+            return False
+
+        # NOTE(vytas): MCP Streamable HTTP, 6.3.2. Value Encoding.
+        #   * string: Use the value as-is
+        #   * integer: Convert to decimal string representation
+        #   * boolean: Convert to lowercase "true" or "false"
+        if isinstance(value, bool):
+            return decoded == ('true' if value else 'false')
+        if isinstance(value, str):
+            return decoded == value
+        # NOTE(vytas): MCP Streamable HTTP, 6.5. Server Validation.
+        #   When validating integer parameter values, servers SHOULD compare
+        #   the header value and the body value numerically rather than as
+        #   strings (e.g., 42.0 and 42 are considered equal).
+        if isinstance(value, (int, float)) and _INTEGER.fullmatch(decoded):
+            try:
+                return int(decoded.partition('.')[0]) == value
+            except ValueError:
+                # NOTE(vytas): CPython refuses to convert too many digits.
+                return False
+        return False
+
+    def _validate_param_headers(
+        self, context: Context, rpc_req: dict[str, Any]
+    ) -> None:
+        params = rpc_req.get('params')
+        name = _get(params, 'name')
+        if rpc_req.get('method') != 'tools/call' or not isinstance(name, str):
+            return
+
+        # NOTE(vytas): MCP Streamable HTTP, 6.3.4. Server Behavior for Custom
+        #   Headers.
+        #   Any server that processes the message body MUST validate that
+        #   encoded header values, after decoding if Base64-encoded, match
+        #   the corresponding values in the request body.
+        header_params = self._rpc_server.tools.get_header_params(context, name)
+        for path, header_name in header_params.items():
+            # NOTE(vytas): MCP Streamable HTTP, 6.3.1. Schema Extension.
+            #   Header extraction is defined as reading the instance value at
+            #   the exact property path of the annotated property.
+            value = _get(params, 'arguments')
+            for key in path:
+                value = _get(value, key)
+
+            header = context.req.get_header(f'Mcp-Param-{header_name}')
+            if not self._mirrors(header, value):
+                raise errors.RPCHeaderMismatch(
+                    f'Header mismatch: Mcp-Param-{header_name} header value '
+                    f'{header!r} does not match body value {value!r}'
+                )
+
     # NOTE(vytas): MCP Streamable HTTP, 2. Sending Messages.
     #   The client MUST use HTTP POST to send JSON-RPC messages.
-    async def on_post(self, req: Request, resp: Response) -> None:
+    async def on_post(
+        self, req: Request, resp: Response, **params: Any
+    ) -> None:
         # NOTE(vytas): MCP Streamable HTTP, 1. Security & Endpoint.
         #   Servers MUST validate the Origin header on all incoming
         #   connections to prevent DNS rebinding attacks.
@@ -171,13 +250,21 @@ class StreamableHTTP:
             )
 
         try:
+            meta = _get(rpc_req.get('params'), '_meta')
+            context = Context(
+                req=req,
+                path_params=params,
+                meta=meta if isinstance(meta, dict) else {},
+            )
+
             # NOTE(vytas): MCP Streamable HTTP, 2. Sending Messages.
             #   Header requirements for notification POSTs are not defined by
             #   this revision.
             if not self._rpc_server.is_notification(rpc_req):
                 self._validate_headers(req, rpc_req)
+                self._validate_param_headers(context, rpc_req)
 
-            result = await self._rpc_server.handle(rpc_req)
+            result = await self._rpc_server.handle(rpc_req, context)
         except errors.RPCError as ex:
             rpc_resp = {'jsonrpc': '2.0', 'error': ex.marshal()}
             if (req_id := rpc_req.get('id')) is not None:
