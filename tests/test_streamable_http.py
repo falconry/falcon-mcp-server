@@ -1,3 +1,6 @@
+import datetime
+import importlib.util
+import pathlib
 import sys
 from typing import TYPE_CHECKING
 
@@ -24,6 +27,8 @@ INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 
 ORIGIN = 'https://app.example'
+
+EXAMPLES = pathlib.Path(__file__).resolve().parent.parent / 'examples'
 
 
 @pytest.fixture
@@ -534,6 +539,194 @@ def test_tool_annotations(filtered_client):
         'greet_all': {'destructiveHint': True},
         'unannotated': None,
     }
+
+
+def test_tool_meta(client, server):
+    meta = {'ui': {'resourceUri': 'ui://weather/forecast.html'}}
+    server.add_tool(ping, meta=meta)
+
+    resp = rpc(client, 'tools/list')
+    assert resp.status_code == 200
+    listed = {
+        tool['name']: tool.get('_meta')
+        for tool in resp.json['result']['tools']
+    }
+    assert listed == {'greet': None, 'ping': meta}
+
+
+@pytest.mark.parametrize(
+    'result', [{'city': 'London', 'temperature': 15}, {}, [1, 2], 'text', None]
+)
+def test_structured_content(client, server, result):
+    async def produce():
+        return result
+
+    server.add_tool(produce)
+
+    resp = rpc(client, 'tools/call', {'name': 'produce'})
+    assert resp.status_code == 200
+    call_result = resp.json['result']
+    assert [block['type'] for block in call_result['content']] == ['text']
+    if isinstance(result, dict):
+        assert call_result['structuredContent'] == result
+    else:
+        assert 'structuredContent' not in call_result
+
+
+async def inventory() -> dict[str, list[str]]:
+    return {'cities': ['London', 'New York']}
+
+
+def test_result_serialized_as_json(client, server):
+    server.add_tool(inventory)
+
+    resp = rpc(client, 'tools/call', {'name': 'inventory'})
+    assert resp.status_code == 200
+    assert resp.json['result']['content'] == [
+        {'type': 'text', 'text': '{"cities": ["London", "New York"]}'}
+    ]
+
+
+async def stamped() -> dict[str, object]:
+    return {'cities': ['London'], 'updated': datetime.date(2026, 10, 13)}
+
+
+def serialize_cities(result, context: Context):
+    if context.req.get_param('format') == 'csv':
+        return ','.join(result['cities'])
+    if context.req.get_param('format') == 'xml':
+        raise falcon.HTTPInvalidParam('XML is not supported.', 'format')
+    return f'{len(result["cities"])} cities'
+
+
+@pytest.fixture
+def serializing_client():
+    mcp = falcon_mcp_server.MCP(result_serializer=serialize_cities)
+    mcp.add_tool(inventory)
+    mcp.add_tool(ping)
+    mcp.add_tool(stamped)
+    return falcon.testing.TestClient(mcp.create_app())
+
+
+@pytest.mark.parametrize(
+    'path,text',
+    [('/mcp', '2 cities'), ('/mcp?format=csv', 'London,New York')],
+)
+def test_result_serializer(serializing_client, path, text):
+    resp = rpc(
+        serializing_client, 'tools/call', {'name': 'inventory'}, path=path
+    )
+    assert resp.status_code == 200
+    assert resp.json['result']['content'] == [{'type': 'text', 'text': text}]
+    assert resp.json['result']['structuredContent'] == {
+        'cities': ['London', 'New York']
+    }
+
+    # NOTE: A string is passed on as is.
+    resp = rpc(serializing_client, 'tools/call', {'name': 'ping'}, path=path)
+    assert resp.status_code == 200
+    assert resp.json['result'] == {
+        **resp.json['result'],
+        'content': [{'type': 'text', 'text': 'pong'}],
+    }
+
+
+# NOTE: A serializer need not take the context; str() has no signature
+#   to inspect at all.
+@pytest.mark.parametrize(
+    'serializer,text',
+    [
+        (str, "{'cities': ['London', 'New York']}"),
+        (lambda result: ' & '.join(result['cities']), 'London & New York'),
+    ],
+)
+def test_result_serializer_without_context(serializer, text):
+    mcp = falcon_mcp_server.MCP(result_serializer=serializer)
+    mcp.add_tool(inventory)
+    client = falcon.testing.TestClient(mcp.create_app())
+
+    resp = rpc(client, 'tools/call', {'name': 'inventory'})
+    assert resp.status_code == 200
+    assert resp.json['result']['content'] == [{'type': 'text', 'text': text}]
+
+
+def test_result_serializer_http_error(serializing_client, caplog):
+    resp = rpc(
+        serializing_client,
+        'tools/call',
+        {'name': 'inventory'},
+        path='/mcp?format=xml',
+    )
+    assert resp.status_code == 400
+    assert resp.json['title'] == 'Invalid parameter'
+    assert not caplog.records
+
+
+def test_result_serializer_beyond_json(serializing_client):
+    resp = rpc(serializing_client, 'tools/call', {'name': 'stamped'})
+    assert resp.status_code == 200
+    # NOTE: The serializer copes with the date, but the JSON response would
+    #   not, so the result is not repeated as structured content.
+    assert resp.json['result']['content'] == [
+        {'type': 'text', 'text': '1 cities'}
+    ]
+    assert 'structuredContent' not in resp.json['result']
+
+
+async def unserializable() -> dict[str, object]:
+    return {'secret': object()}
+
+
+def test_result_serializer_error_concealed(client, server, caplog):
+    server.add_tool(unserializable)
+
+    resp = rpc(client, 'tools/call', {'name': 'unserializable'})
+    assert resp.status_code == 200
+    assert resp.json['error']['code'] == INTERNAL_ERROR
+    assert 'unserializable' in resp.json['error']['message']
+    assert 'object' not in resp.json['error']['message']
+    assert 'TypeError' in caplog.text
+
+
+def test_widget_example():
+    spec = importlib.util.spec_from_file_location(
+        'widget_example', EXAMPLES / 'widget.py'
+    )
+    widget = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(widget)
+    client = falcon.testing.TestClient(widget.mcp.create_app())
+
+    resp = rpc(client, 'tools/list')
+    assert resp.status_code == 200
+    (tool,) = resp.json['result']['tools']
+    uri = tool['_meta']['ui']['resourceUri']
+    assert uri.startswith('ui://')
+
+    resp = rpc(client, 'resources/read', {'uri': uri})
+    assert resp.status_code == 200
+    (contents,) = resp.json['result']['contents']
+    assert contents['mimeType'] == 'text/html;profile=mcp-app'
+    assert 'ui/initialize' in contents['text']
+
+    resp = rpc(
+        client,
+        'tools/call',
+        {'name': tool['name'], 'arguments': {'city': 'London'}},
+    )
+    assert resp.status_code == 200
+    assert resp.json['result']['structuredContent'] == {
+        'city': 'London',
+        'temperature': 15,
+        'unit': '\xb0C',
+    }
+
+    resp = rpc(
+        client,
+        'tools/call',
+        {'name': tool['name'], 'arguments': {'city': 'Atlantis'}},
+    )
+    assert resp.status_code == 200
+    assert resp.json['result']['isError'] is True
 
 
 def test_tool_filter(filtered_client):

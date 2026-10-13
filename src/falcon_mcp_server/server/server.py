@@ -13,15 +13,12 @@ from falcon_mcp_server.constants import PROJECT_URL
 from falcon_mcp_server.constants import SUPPORTED_MCP_PROTOCOL_VERSIONS
 from falcon_mcp_server.context import Context
 from falcon_mcp_server.logger import log
+from falcon_mcp_server.server.introspection import find_context_param
 from falcon_mcp_server.server.prompts import Prompts
 from falcon_mcp_server.server.resources import Resources
+from falcon_mcp_server.server.tools import ResultSerializer
 from falcon_mcp_server.server.tools import ToolFilter
 from falcon_mcp_server.server.tools import Tools
-
-try:
-    import toon_format
-except ImportError:
-    toon_format = None
 
 # NOTE(vytas): MCP Caching, 1. Cacheable Results.
 #   Servers MUST include caching hints on results with
@@ -49,10 +46,17 @@ class RPCServer:
         version: str = '1.0.0',
         instructions: str | None = None,
         tool_filter: ToolFilter | None = None,
+        result_serializer: ResultSerializer | None = None,
     ) -> None:
         self._prompts: Prompts = Prompts()
         self._resources: Resources = Resources()
         self._tools: Tools = Tools(tool_filter)
+        self._result_serializer: ResultSerializer = (
+            result_serializer or json.dumps
+        )
+        self._serializer_context_param = find_context_param(
+            self._result_serializer
+        )
 
         self._rpc_api = {
             # Discovery
@@ -96,6 +100,14 @@ class RPCServer:
     @property
     def tools(self) -> Tools:
         return self._tools
+
+    @staticmethod
+    def _is_json_serializable(value: Any) -> bool:
+        try:
+            json.dumps(value)
+        except (TypeError, ValueError):
+            return False
+        return True
 
     def is_notification(self, rpc_req: dict[str, Any]) -> bool:
         method: str | None = rpc_req.get('method')
@@ -268,25 +280,39 @@ class RPCServer:
                 ],
             }
 
-        if toon_format is not None:
-            return {
-                'content': [
-                    {
-                        'type': 'text',
-                        'mimeType': 'text/toon',
-                        'text': toon_format.encode(result),
-                    },
-                ],
-            }
+        kwargs = {}
+        if self._serializer_context_param is not None:
+            kwargs[self._serializer_context_param] = context
 
-        return {
-            'content': [
-                {
-                    'type': 'text',
-                    'text': json.dumps(result),
-                },
-            ],
+        try:
+            text = self._result_serializer(result, **kwargs)
+        except (errors.RPCError, falcon.HTTPError):
+            # NOTE(vytas): These are assumed to be raised intentionally.
+            raise
+        except Exception:
+            # NOTE(vytas): The details of an unexpected exception may be
+            #   sensitive, so they are logged, but not sent to the client.
+            log.exception(f'Error serializing the result of tool {name}')
+            raise errors.RPCInternalError(
+                f'Error serializing the result of tool {name}'
+            )
+
+        call_result: dict[str, Any] = {
+            'content': [{'type': 'text', 'text': text}]
         }
+        # NOTE(vytas): MCP Tools, 5.2.6. Structured Content.
+        #   For backwards compatibility, a tool that returns structured
+        #   content SHOULD also return the serialized JSON in a TextContent
+        #   block.
+        # NOTE(vytas): The revisions before 2026-07-28 only allowed objects.
+        # NOTE(vytas): A custom serializer may render values that JSON cannot
+        #   represent, such as dates; these would break the response.
+        if isinstance(result, dict) and (
+            self._result_serializer is json.dumps
+            or self._is_json_serializable(result)
+        ):
+            call_result['structuredContent'] = result
+        return call_result
 
     async def _tools_list(
         self, params: dict[str, Any], context: Context

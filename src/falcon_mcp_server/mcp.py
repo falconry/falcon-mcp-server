@@ -8,6 +8,7 @@ from typing import Any
 import falcon.asgi
 
 from falcon_mcp_server.server.server import RPCServer
+from falcon_mcp_server.server.tools import ResultSerializer
 from falcon_mcp_server.server.tools import ToolAnnotations
 from falcon_mcp_server.server.tools import ToolFilter
 from falcon_mcp_server.transport.streamablehttp import StreamableHTTP
@@ -35,6 +36,9 @@ class MCP:
         instructions: Guidance for LLMs on how to use the server.
         tool_filter: Callable ``(context, tool) -> bool`` deciding whether a
             tool is listed and callable in a request (default: always).
+        result_serializer: Callable ``(result) -> str`` rendering a tool
+            result that is not a string as text (default ``json.dumps``). A
+            parameter annotated with :class:`Context` receives the context.
     """
 
     def __init__(
@@ -46,6 +50,7 @@ class MCP:
         version: str = '1.0.0',
         instructions: str | None = None,
         tool_filter: ToolFilter | None = None,
+        result_serializer: ResultSerializer | None = None,
     ) -> None:
         if not isinstance(allowed_origins, str):
             allowed_origins = tuple(allowed_origins)
@@ -58,6 +63,7 @@ class MCP:
             version=version,
             instructions=instructions,
             tool_filter=tool_filter,
+            result_serializer=result_serializer,
         )
         self._streamable_http = StreamableHTTP(
             self._rpc_server, allowed_origins=allowed_origins
@@ -175,12 +181,17 @@ class MCP:
         description: str | None = None,
         input_schema: dict[Any, Any] | None = None,
         annotations: ToolAnnotations | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> None:
         """Add a tool implemented by an async callable.
 
         The callable receives the tool arguments as keyword arguments. A
         parameter annotated with :class:`Context` receives the request
         context instead of a tool argument; leave it out of ``input_schema``.
+
+        A string that the callable returns is sent as text. Any other value
+        is rendered as text by the result serializer of the server, and a
+        ``dict`` is also sent as structured content.
 
         Raise :class:`ToolError` to report an error that the model can act
         upon, or a :class:`falcon.HTTPError` to respond with that HTTP error.
@@ -197,6 +208,7 @@ class MCP:
             description: Description (default: the callable's docstring).
             input_schema: JSON Schema of the tool arguments (default: any).
             annotations: MCP tool annotations, see :class:`ToolAnnotations`.
+            meta: The ``_meta`` object of the tool, e.g., linking an MCP App.
 
         Raises:
             ValueError: The name is taken, or ``x-mcp-header`` is misused.
@@ -208,6 +220,7 @@ class MCP:
             description=description,
             input_schema=input_schema,
             annotations=annotations,
+            meta=meta,
         )
 
     def create_app(

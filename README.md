@@ -35,10 +35,10 @@ pip install git+https://github.com/falconry/falcon-mcp-server
 
 ## Example Usage
 
-See the example in ``example/example.py``, which exposes a tool, a prompt
+See the example in ``examples/example.py``, which exposes a tool, a prompt
 and a resource.
 
-Change dir to ``example/``, and run with Uvicorn:
+Change dir to ``examples/``, and run with Uvicorn:
 ```console
 uvicorn --log-config logging.yaml --factory example:mcp.create_app
 ```
@@ -110,6 +110,29 @@ def tool_filter(context, tool):
 mcp = falcon_mcp_server.MCP(tool_filter=tool_filter)
 ```
 
+A tool result that is not a string is rendered as JSON for the model. Pass a
+serializer to render it otherwise, e.g., as [TOON](https://toonformat.dev):
+```python
+# With toon-format, the official implementation:
+mcp = falcon_mcp_server.MCP(result_serializer=toon_format.dumps)
+
+# Or with toons, which is implemented in Rust:
+mcp = falcon_mcp_server.MCP(result_serializer=toons.dumps)
+```
+
+As with tools, a parameter of the serializer annotated with `Context` receives
+the context of the request. This way, the format can also be chosen via the
+URL of the end point, such as `/mcp?format=toon`:
+```python
+def serialize(result, context: Context) -> str:
+    if context.req.get_param('format') == 'toon':
+        return toon_format.dumps(result)
+    return json.dumps(result)
+
+
+mcp = falcon_mcp_server.MCP(result_serializer=serialize)
+```
+
 A tool argument can be mirrored into an HTTP header, e.g., for a reverse proxy
 to log or route on without parsing the request body. Annotate the argument
 with `x-mcp-header` in the input schema, as the example does for `city`, and
@@ -154,6 +177,27 @@ async def get_usage(context: Context) -> str:
 
 mcp.add_resource('usage://current', 'application/json', get_usage)
 ```
+
+A tool can be paired with an
+[MCP App](https://github.com/modelcontextprotocol/ext-apps), i.e., an HTML
+widget that the supporting hosts render in place of the plain tool result.
+Serve the widget as a `ui://` resource, and point the tool to it via `meta`.
+A `dict` that the tool returns is also sent as structured content, which is
+what the widget gets to render:
+```python
+WIDGET_URI = 'ui://weather-example/temperature.html'
+
+mcp.add_tool(show_temperature, meta={'ui': {'resourceUri': WIDGET_URI}})
+mcp.add_resource(WIDGET_URI, 'text/html;profile=mcp-app', read_widget)
+```
+
+See ``examples/widget.py`` and ``examples/widget.html`` for the complete
+example. It runs in the same way as the first one:
+```console
+uvicorn --log-config logging.yaml --factory widget:mcp.create_app
+```
+
+A host that runs in a web browser needs its origin to be allowed, see below.
 
 Requests from web browsers (i.e., the ones carrying an `Origin` header) are
 rejected with HTTP 403 unless their origin is explicitly allowed. Optionally,

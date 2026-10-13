@@ -80,6 +80,28 @@ async def test_sdk_client_tool_error():
         assert result.content[0].text == 'Unknown city: Atlantis'
 
 
+async def forecast(city: str) -> dict[str, str | int]:
+    return {'city': city, 'temperature': 15}
+
+
+@pytest.mark.anyio
+async def test_sdk_client_structured_content():
+    meta = {'ui': {'resourceUri': 'ui://weather/forecast.html'}}
+    server = falcon_mcp_server.MCP()
+    server.add_tool(forecast, meta=meta)
+
+    async with connect(server.create_app()) as client:
+        tools = await client.list_tools()
+        assert tools.tools[0].meta == meta
+
+        result = await client.call_tool('forecast', {'city': 'London'})
+        assert not result.is_error
+        assert result.structured_content == {
+            'city': 'London',
+            'temperature': 15,
+        }
+
+
 async def whereami(context: Context) -> str:
     """Path that the request was sent to."""
     return context.req.path

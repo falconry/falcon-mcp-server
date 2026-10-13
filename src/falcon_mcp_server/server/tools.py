@@ -50,6 +50,7 @@ class Tool:
         description: Description of the tool.
         input_schema: JSON Schema of the tool arguments, if any.
         annotations: MCP tool annotations, such as ``readOnlyHint``.
+        meta: The ``_meta`` object of the tool, if any.
         context_param: Name of the parameter receiving the context, if any.
         header_params: ``x-mcp-header`` names by the path of the argument.
     """
@@ -62,6 +63,7 @@ class Tool:
     annotations: ToolAnnotations = dataclasses.field(
         default_factory=ToolAnnotations
     )
+    meta: dict[str, Any] = dataclasses.field(default_factory=dict)
     context_param: str | None = None
     header_params: dict[tuple[str, ...], str] = dataclasses.field(
         default_factory=dict
@@ -79,10 +81,13 @@ class Tool:
         }
         if self.annotations:
             data['annotations'] = self.annotations
+        if self.meta:
+            data['_meta'] = self.meta
         return data
 
 
 ToolFilter = Callable[[Context, Tool], bool]
+ResultSerializer = Callable[..., str]
 
 
 class Tools:
@@ -204,6 +209,7 @@ class Tools:
         description: str | None = None,
         input_schema: dict[Any, Any] | None = None,
         annotations: ToolAnnotations | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> None:
         name = name or tool.__name__
         if name in self._tools:
@@ -219,6 +225,7 @@ class Tools:
             description=description,
             input_schema=input_schema,
             annotations=annotations or {},
+            meta=meta or {},
             context_param=find_context_param(tool),
             header_params=self._find_header_params(input_schema),
         )
