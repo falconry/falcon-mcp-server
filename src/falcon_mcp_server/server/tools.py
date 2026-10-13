@@ -6,7 +6,7 @@ import re
 from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, TypedDict
 
 import falcon
 
@@ -15,6 +15,28 @@ from falcon_mcp_server.context import Context
 from falcon_mcp_server.logger import log
 from falcon_mcp_server.server.introspection import find_context_param
 from falcon_mcp_server.server.pagination import paginate
+
+
+class ToolAnnotations(TypedDict, total=False):
+    """MCP tool annotations: hints describing the behavior of a tool.
+
+    All keys are optional; a client assumes the default for an absent hint.
+    The destructive and idempotent hints only apply to a tool that is not
+    read-only.
+
+    Attributes:
+        title: Human-readable name; the tool's own title takes precedence.
+        readOnlyHint: The tool does not modify its environment (default false).
+        destructiveHint: The tool may make destructive updates (default true).
+        idempotentHint: Repeating a call has no further effect (default false).
+        openWorldHint: The tool reaches external entities (default true).
+    """
+
+    title: str
+    readOnlyHint: bool
+    destructiveHint: bool
+    idempotentHint: bool
+    openWorldHint: bool
 
 
 @dataclasses.dataclass
@@ -37,7 +59,9 @@ class Tool:
     title: str
     description: str
     input_schema: dict[Any, Any] | None = None
-    annotations: dict[str, Any] = dataclasses.field(default_factory=dict)
+    annotations: ToolAnnotations = dataclasses.field(
+        default_factory=ToolAnnotations
+    )
     context_param: str | None = None
     header_params: dict[tuple[str, ...], str] = dataclasses.field(
         default_factory=dict
@@ -179,7 +203,7 @@ class Tools:
         title: str | None = None,
         description: str | None = None,
         input_schema: dict[Any, Any] | None = None,
-        annotations: dict[str, Any] | None = None,
+        annotations: ToolAnnotations | None = None,
     ) -> None:
         name = name or tool.__name__
         if name in self._tools:

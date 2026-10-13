@@ -509,7 +509,10 @@ def read_only_filter(context, tool):
 def filtered_client():
     mcp = falcon_mcp_server.MCP(tool_filter=read_only_filter)
     mcp.add_tool(ping, annotations={'readOnlyHint': True})
-    mcp.add_tool(greet_all, annotations={'destructiveHint': True})
+    mcp.add_tool(
+        greet_all,
+        annotations=falcon_mcp_server.ToolAnnotations(destructiveHint=True),
+    )
     mcp.add_tool(ping, name='unannotated')
     return falcon.testing.TestClient(mcp.create_app())
 

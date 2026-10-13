@@ -8,6 +8,7 @@ from typing import Any
 import falcon.asgi
 
 from falcon_mcp_server.server.server import RPCServer
+from falcon_mcp_server.server.tools import ToolAnnotations
 from falcon_mcp_server.server.tools import ToolFilter
 from falcon_mcp_server.transport.streamablehttp import StreamableHTTP
 
@@ -122,7 +123,7 @@ class MCP:
         title: str | None = None,
         description: str | None = None,
         input_schema: dict[Any, Any] | None = None,
-        annotations: dict[str, Any] | None = None,
+        annotations: ToolAnnotations | None = None,
     ) -> None:
         """Add a tool implemented by an async callable.
 
@@ -144,7 +145,7 @@ class MCP:
             title: Human-readable name of the tool for display purposes.
             description: Description (default: the callable's docstring).
             input_schema: JSON Schema of the tool arguments (default: any).
-            annotations: MCP tool annotations, such as ``readOnlyHint``.
+            annotations: MCP tool annotations, see :class:`ToolAnnotations`.
 
         Raises:
             ValueError: The name is taken, or ``x-mcp-header`` is misused.

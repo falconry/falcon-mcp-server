@@ -94,6 +94,10 @@ app = falcon.asgi.App()
 app.add_route('/{account:int}/mcp', mcp)
 ```
 
+The `annotations` are hints describing the behavior of a tool to clients. The
+dictionary is typed as `ToolAnnotations`, so a type checker catches a misspelt
+or non-boolean hint.
+
 The tools exposed to a request can be narrowed down with a filter. A tool that
 is filtered out is neither listed nor callable:
 ```python
