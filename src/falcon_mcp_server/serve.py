@@ -8,7 +8,7 @@ import falcon.asgi
 try:
     import uvicorn
 except ImportError:
-    uvicorn = None
+    uvicorn = None  # type: ignore[assignment]
 
 
 def main() -> None:

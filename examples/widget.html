@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light dark">
+  <title>Temperature</title>
+  <style>
+    /* Fallbacks for the style variables that the host may provide. */
+    :root {
+      --color-background-secondary: light-dark(#f5f5f4, #292524);
+      --color-border-primary: light-dark(#d6d3d1, #57534e);
+      --color-text-primary: light-dark(#1c1917, #fafaf9);
+      --color-text-secondary: light-dark(#57534e, #a8a29e);
+      --color-text-danger: light-dark(#b91c1c, #f87171);
+      --font-sans: system-ui, sans-serif;
+      --border-radius-lg: 12px;
+    }
+
+    html, body {
+      margin: 0;
+      background: transparent;
+    }
+
+    body {
+      padding: 4px;
+      color: var(--color-text-primary);
+      font-family: var(--font-sans);
+    }
+
+    .card {
+      box-sizing: border-box;
+      max-width: 320px;
+      padding: 16px 20px;
+      border: 1px solid var(--color-border-primary);
+      border-radius: var(--border-radius-lg);
+      background: var(--color-background-secondary);
+    }
+
+    p {
+      margin: 0;
+    }
+
+    #city, #status {
+      color: var(--color-text-secondary);
+      font-size: 14px;
+    }
+
+    #temperature {
+      margin: 4px 0 12px;
+      font-size: 44px;
+      font-weight: 600;
+      line-height: 1.1;
+    }
+
+    /* A thermometer ranging from -20 to 40 degrees. */
+    #scale {
+      position: relative;
+      height: 6px;
+      margin-bottom: 12px;
+      border-radius: 3px;
+      background: linear-gradient(to right, #38bdf8, #facc15, #ef4444);
+    }
+
+    #marker {
+      position: absolute;
+      top: -4px;
+      width: 4px;
+      height: 14px;
+      margin-left: -2px;
+      border-radius: 2px;
+      background: var(--color-text-primary);
+    }
+
+    .failed #status {
+      color: var(--color-text-danger);
+    }
+
+    .failed #scale, #marker[hidden] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <p id="city">Temperature</p>
+    <p id="temperature">&ndash;</p>
+    <div id="scale"><div id="marker" hidden></div></div>
+    <p id="status">Waiting for the tool call&hellip;</p>
+  </main>
+
+  <script>
+    (() => {
+      'use strict';
+
+      // The view talks to its host in JSON-RPC 2.0 via postMessage(), see
+      // https://github.com/modelcontextprotocol/ext-apps (specification).
+      const host = window.parent;
+      const pending = new Map();
+      let nextId = 1;
+
+      const send = (message) => host.postMessage({jsonrpc: '2.0', ...message}, '*');
+      const notify = (method, params = {}) => send({method, params});
+      const request = (method, params = {}) => new Promise((resolve, reject) => {
+        const id = nextId++;
+        pending.set(id, {resolve, reject});
+        send({id, method, params});
+      });
+
+      const card = document.querySelector('.card');
+      const show = (id, text) => {
+        document.getElementById(id).textContent = text;
+      };
+
+      function fail(reason) {
+        card.classList.add('failed');
+        show('temperature', '–');
+        show('status', reason);
+      }
+
+      function applyHostContext(context) {
+        const root = document.documentElement;
+        if (context.theme) {
+          root.style.colorScheme = context.theme;
+        }
+        for (const [name, value] of Object.entries(context.styles?.variables ?? {})) {
+          if (value) {
+            root.style.setProperty(name, value);
+          }
+        }
+      }
+
+      // The arguments that the tool was called with arrive first...
+      function onToolInput({arguments: args}) {
+        card.classList.remove('failed');
+        show('city', args?.city ?? 'Temperature');
+        show('status', 'Looking up the temperature…');
+      }
+
+      // ...followed by the result of the call, which hydrates the widget.
+      function onToolResult(result) {
+        if (result.isError) {
+          fail(result.content?.find((block) => block.type === 'text')?.text ?? 'Error');
+          return;
+        }
+
+        const {city, temperature, unit} = result.structuredContent ?? {};
+        if (typeof temperature !== 'number') {
+          fail('The tool result carries no temperature.');
+          return;
+        }
+
+        const marker = document.getElementById('marker');
+        marker.style.left = `${Math.min(Math.max((temperature + 20) / 60, 0), 1) * 100}%`;
+        marker.hidden = false;
+
+        card.classList.remove('failed');
+        show('city', city);
+        show('temperature', `${temperature}${unit}`);
+        show('status', 'Made-up weather, served by falcon-mcp-server.');
+      }
+
+      const notifications = {
+        'ui/notifications/tool-input': onToolInput,
+        'ui/notifications/tool-result': onToolResult,
+        'ui/notifications/tool-cancelled': ({reason}) => fail(reason || 'The tool call was cancelled.'),
+        'ui/notifications/host-context-changed': applyHostContext,
+      };
+
+      // The requests that the host may send to the view.
+      const requests = {
+        'ping': () => ({}),
+        'ui/resource-teardown': () => ({}),
+      };
+
+      window.addEventListener('message', (event) => {
+        const message = event.data;
+        if (event.source !== host || message?.jsonrpc !== '2.0') {
+          return;
+        }
+
+        if (message.method === undefined) {
+          // A response to one of our requests.
+          const call = pending.get(message.id);
+          pending.delete(message.id);
+          if (message.error) {
+            call?.reject(new Error(message.error.message));
+          } else {
+            call?.resolve(message.result);
+          }
+        } else if (message.id === undefined) {
+          notifications[message.method]?.(message.params ?? {});
+        } else if (message.method in requests) {
+          send({id: message.id, result: requests[message.method](message.params)});
+        } else {
+          send({id: message.id, error: {code: -32601, message: 'Method not found'}});
+        }
+      });
+
+      // Let the host know how much room the widget takes.
+      let reported = '';
+      function reportSize() {
+        const width = Math.ceil(window.innerWidth);
+        const height = Math.ceil(document.documentElement.getBoundingClientRect().height);
+        if (reported !== `${width}x${height}`) {
+          reported = `${width}x${height}`;
+          notify('ui/notifications/size-changed', {width, height});
+        }
+      }
+
+      // The host sends nothing before the view has completed the handshake.
+      request('ui/initialize', {
+        protocolVersion: '2026-01-26',
+        appInfo: {name: 'temperature-widget', version: '1.0.0'},
+        appCapabilities: {},
+      }).then((result) => {
+        applyHostContext(result.hostContext ?? {});
+        notify('ui/notifications/initialized');
+        new ResizeObserver(reportSize).observe(document.documentElement);
+      });
+    })();
+  </script>
+</body>
+</html>

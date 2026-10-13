@@ -5,41 +5,65 @@ from typing import Any
 
 import falcon
 
+from falcon_mcp_server import errors
+from falcon_mcp_server.constants import META_CLIENT_CAPABILITIES
+from falcon_mcp_server.constants import META_PROTOCOL_VERSION
+from falcon_mcp_server.constants import META_SERVER_INFO
 from falcon_mcp_server.constants import PROJECT_URL
 from falcon_mcp_server.constants import SUPPORTED_MCP_PROTOCOL_VERSIONS
+from falcon_mcp_server.context import Context
 from falcon_mcp_server.logger import log
+from falcon_mcp_server.server.introspection import find_context_param
+from falcon_mcp_server.server.prompts import Prompts
 from falcon_mcp_server.server.resources import Resources
+from falcon_mcp_server.server.tools import ResultSerializer
+from falcon_mcp_server.server.tools import ToolFilter
 from falcon_mcp_server.server.tools import Tools
-from falcon_mcp_server.session.session import Session
 
-try:
-    import toon_format
-except ImportError:
-    toon_format = None
+# NOTE(vytas): MCP Caching, 1. Cacheable Results.
+#   Servers MUST include caching hints on results with
+#   resultType: "complete" returned by the following operations:
+#   server/discover, tools/list, prompts/list, resources/list,
+#   resources/templates/list, resources/read.
+# TODO(vytas): Make the hints configurable. For now, everything is advertised
+#   as immediately stale, i.e., clients behave as before this was introduced.
+CACHE_HINTS = {'ttlMs': 0, 'cacheScope': 'private'}
+
+
+def _get_str(params: dict[str, Any], name: str) -> str:
+    value = params.get(name)
+    if not isinstance(value, str):
+        raise errors.RPCInvalidParam(f'Missing or invalid parameter: {name}')
+    return value
 
 
 class RPCServer:
     def __init__(
         self,
-        name: str = 'falcon-mcp-server',
-        title: str = 'Falcon MCP Server project',
-        description: str = (
-            f'MCP server using falcon-mcp-server: {PROJECT_URL}'
-        ),
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
         version: str = '1.0.0',
+        instructions: str | None = None,
+        tool_filter: ToolFilter | None = None,
+        result_serializer: ResultSerializer | None = None,
     ) -> None:
+        self._prompts: Prompts = Prompts()
         self._resources: Resources = Resources()
-        self._tools: Tools = Tools()
+        self._tools: Tools = Tools(tool_filter)
+        self._result_serializer: ResultSerializer = (
+            result_serializer or json.dumps
+        )
+        self._serializer_context_param = find_context_param(
+            self._result_serializer
+        )
 
         self._rpc_api = {
-            # Initialization
-            'initialize': self._initialize,
-            # Notifications, currently no-op
-            # 'notifications/initialized': ...
-            # 'notifications/cancelled': ...
-            # Utilities
-            'logging/setLevel': self._logging_set_level,
-            'ping': self._ping,
+            # Discovery
+            'server/discover': self._server_discover,
+            # Prompts
+            'prompts/get': self._prompts_get,
+            'prompts/list': self._prompts_list,
             # Resources
             'resources/list': self._resources_list,
             'resources/read': self._resources_read,
@@ -48,12 +72,26 @@ class RPCServer:
             'tools/list': self._tools_list,
         }
 
-        self._server_info = {
-            'name': name,
-            'title': title,
-            'version': version,
-            'description': description,
-        }
+        # NOTE(vytas): The default title and description are about this
+        #   project, so they would only mislead next to a custom name.
+        if name is None:
+            name = 'falcon-mcp-server'
+            title = title or 'Falcon MCP Server project'
+            description = description or (
+                f'MCP server using falcon-mcp-server: {PROJECT_URL}'
+            )
+
+        self._server_info = {'name': name, 'version': version}
+        if title is not None:
+            self._server_info['title'] = title
+        if description is not None:
+            self._server_info['description'] = description
+
+        self._instructions = instructions
+
+    @property
+    def prompts(self) -> Prompts:
+        return self._prompts
 
     @property
     def resources(self) -> Resources:
@@ -63,7 +101,15 @@ class RPCServer:
     def tools(self) -> Tools:
         return self._tools
 
-    def _is_notification(self, rpc_req: dict[str, Any]) -> bool:
+    @staticmethod
+    def _is_json_serializable(value: Any) -> bool:
+        try:
+            json.dumps(value)
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    def is_notification(self, rpc_req: dict[str, Any]) -> bool:
         method: str | None = rpc_req.get('method')
         if (
             method
@@ -74,13 +120,44 @@ class RPCServer:
 
         return False
 
+    def _validate_meta(self, params: dict[str, Any]) -> None:
+        meta = params.get('_meta')
+        if not isinstance(meta, dict):
+            meta = {}
+
+        # NOTE(vytas): MCP Overview, 6.1. _meta.
+        #   A request missing any required field is malformed; the server MUST
+        #   reject it with JSON-RPC error code -32602 (Invalid params).
+        for key in (META_PROTOCOL_VERSION, META_CLIENT_CAPABILITIES):
+            if key not in meta:
+                raise errors.RPCInvalidParam(
+                    f'Missing required _meta field: {key}'
+                )
+
+        # NOTE(vytas): MCP Versioning, 2. Protocol Version Negotiation.
+        #   If the server does not implement the requested version (...), it
+        #   MUST respond with an UnsupportedProtocolVersionError listing the
+        #   versions it does support.
+        version = meta[META_PROTOCOL_VERSION]
+        if (
+            not isinstance(version, str)
+            or version not in SUPPORTED_MCP_PROTOCOL_VERSIONS
+        ):
+            raise errors.RPCUnsupportedProtocolVersion(str(version))
+
     async def handle(
-        self, rpc_req: dict[str, Any], session: Session
+        self, rpc_req: dict[str, Any], context: Context
     ) -> dict[str, Any] | None:
         # NOTE(vytas): MCP Overview, 1. Messages.
         #   All messages between MCP clients and servers MUST follow the
         #   JSON-RPC 2.0 specification.
-        if rpc_req.get('jsonrpc') != '2.0':
+        method_name = rpc_req.get('method')
+        params = rpc_req.get('params') or {}
+        if (
+            rpc_req.get('jsonrpc') != '2.0'
+            or not isinstance(method_name, str)
+            or not isinstance(params, dict)
+        ):
             raise falcon.HTTPUnprocessableEntity(
                 description=(
                     'All MCP messages MUST follow the JSON-RPC 2.0 '
@@ -90,22 +167,35 @@ class RPCServer:
 
         log.debug(f'Handle {rpc_req=}')
 
-        if self._is_notification(rpc_req):
+        if self.is_notification(rpc_req):
             # NOTE(vytas): MCP Overview, 1.3. Notifications.
             #   The receiver MUST NOT send a response.
-            # TODO(vytas): Relay anything to the session, if needed.
             return None
 
         # TODO(vytas): Handle missing ID where it must be present according to
         #   the spec.
         req_id = rpc_req.get('id')
 
-        # TODO(vytas): Handle missing keys.
-        method_name = rpc_req['method']
-        method = self._rpc_api[method_name]
-        params = rpc_req.get('params') or {}
+        self._validate_meta(params)
 
-        result = await method(params, session)
+        # NOTE(vytas): MCP Streamable HTTP, 6.1. Protocol Version Header.
+        #   If the server does not implement the requested RPC method, it MUST
+        #   respond with 404 Not Found and a JSON-RPC error with code -32601
+        #   (Method not found).
+        if (method := self._rpc_api.get(method_name)) is None:
+            raise errors.RPCMethodNotFound(f'Method not found: {method_name}')
+
+        result = await method(params, context)
+
+        # NOTE(vytas): MCP Overview, 1.2.1. Result Responses.
+        #   The result MUST include a resultType field to indicate the type of
+        #   the result.
+        result['resultType'] = 'complete'
+        # NOTE(vytas): MCP Overview, 6.1. _meta.
+        #   Servers SHOULD include [serverInfo] in every result's _meta, unless
+        #   specifically configured not to do so, to identify themselves
+        #   without relying on any prior connection state.
+        result.setdefault('_meta', {})[META_SERVER_INFO] = self._server_info
 
         rpc_resp = {'jsonrpc': '2.0', 'result': result}
         if req_id is not None:
@@ -115,56 +205,70 @@ class RPCServer:
 
         return rpc_resp
 
-    async def _initialize(
-        self, params: dict[str, Any], session: Session
-    ) -> dict[str, Any] | None:
-        # TODO(vytas): Handle the case where protocolVersion is missing.
-        protocol_version = params['protocolVersion']
-        if protocol_version not in SUPPORTED_MCP_PROTOCOL_VERSIONS:
-            protocol_version = max(SUPPORTED_MCP_PROTOCOL_VERSIONS)
-
-        return {
-            'protocolVersion': protocol_version,
+    async def _server_discover(
+        self, params: dict[str, Any], context: Context
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            'supportedVersions': sorted(SUPPORTED_MCP_PROTOCOL_VERSIONS),
             'capabilities': {
-                'logging': {},
+                'prompts': {},
                 'resources': {},
                 'tools': {},
             },
-            'serverInfo': self._server_info,
+            **CACHE_HINTS,
         }
+        # NOTE(vytas): MCP Discovery, 4.1. DiscoverResult.
+        #   instructions: Optional natural-language guidance for LLMs on how
+        #   to use this server effectively.
+        if self._instructions is not None:
+            result['instructions'] = self._instructions
+        return result
 
-    async def _logging_set_level(
-        self, params: dict[str, Any], session: Session
-    ) -> dict[str, Any] | None:
-        # TODO(vytas): Relay to the session.
-        return {}
+    async def _prompts_get(
+        self, params: dict[str, Any], context: Context
+    ) -> dict[str, Any]:
+        name = _get_str(params, 'name')
+        arguments = params.get('arguments') or {}
 
-    async def _ping(
-        self, params: dict[str, Any], session: Session
-    ) -> dict[str, Any] | None:
-        return {}
+        return await self._prompts.get_prompt(context, name, arguments)
+
+    async def _prompts_list(
+        self, params: dict[str, Any], context: Context
+    ) -> dict[str, Any]:
+        cursor = params.get('cursor')
+
+        result = await self._prompts.list_prompts(cursor=cursor)
+        return {**result, **CACHE_HINTS}
 
     async def _resources_list(
-        self, params: dict[str, Any], session: Session
-    ) -> dict[str, Any] | None:
-        return await self._resources.list_resources()
+        self, params: dict[str, Any], context: Context
+    ) -> dict[str, Any]:
+        result = await self._resources.list_resources()
+        return {**result, **CACHE_HINTS}
 
     async def _resources_read(
-        self, params: dict[str, Any], session: Session
-    ) -> dict[str, Any] | None:
-        # TODO(vytas): Handle missing name/arguments.
-        uri = params['uri']
-        resource = await self._resources.read_resource(uri)
-        return {'contents': [resource]}
+        self, params: dict[str, Any], context: Context
+    ) -> dict[str, Any]:
+        uri = _get_str(params, 'uri')
+        resource = await self._resources.read_resource(context, uri)
+        return {'contents': [resource], **CACHE_HINTS}
 
     async def _tools_call(
-        self, params: dict[str, Any], session: Session
-    ) -> dict[str, Any] | None:
-        # TODO(vytas): Handle missing name/arguments.
-        name = params['name']
-        arguments = params['arguments']
+        self, params: dict[str, Any], context: Context
+    ) -> dict[str, Any]:
+        name = _get_str(params, 'name')
+        arguments = params.get('arguments') or {}
 
-        result = await self._tools.call_tool(name, arguments)
+        try:
+            result = await self._tools.call_tool(context, name, arguments)
+        except errors.ToolError as ex:
+            # NOTE(vytas): MCP Tools, 7. Error Handling.
+            #   Tool Execution Errors (...) are reported in tool results with
+            #   isError: true.
+            return {
+                'content': [{'type': 'text', 'text': str(ex)}],
+                'isError': True,
+            }
 
         if isinstance(result, str):
             return {
@@ -176,29 +280,44 @@ class RPCServer:
                 ],
             }
 
-        if toon_format is not None:
-            return {
-                'content': [
-                    {
-                        'type': 'text',
-                        'mimeType': 'text/toon',
-                        'text': toon_format.encode(result),
-                    },
-                ],
-            }
+        kwargs = {}
+        if self._serializer_context_param is not None:
+            kwargs[self._serializer_context_param] = context
 
-        return {
-            'content': [
-                {
-                    'type': 'text',
-                    'text': json.dumps(result),
-                },
-            ],
+        try:
+            text = self._result_serializer(result, **kwargs)
+        except (errors.RPCError, falcon.HTTPError):
+            # NOTE(vytas): These are assumed to be raised intentionally.
+            raise
+        except Exception:
+            # NOTE(vytas): The details of an unexpected exception may be
+            #   sensitive, so they are logged, but not sent to the client.
+            log.exception(f'Error serializing the result of tool {name}')
+            raise errors.RPCInternalError(
+                f'Error serializing the result of tool {name}'
+            )
+
+        call_result: dict[str, Any] = {
+            'content': [{'type': 'text', 'text': text}]
         }
+        # NOTE(vytas): MCP Tools, 5.2.6. Structured Content.
+        #   For backwards compatibility, a tool that returns structured
+        #   content SHOULD also return the serialized JSON in a TextContent
+        #   block.
+        # NOTE(vytas): The revisions before 2026-07-28 only allowed objects.
+        # NOTE(vytas): A custom serializer may render values that JSON cannot
+        #   represent, such as dates; these would break the response.
+        if isinstance(result, dict) and (
+            self._result_serializer is json.dumps
+            or self._is_json_serializable(result)
+        ):
+            call_result['structuredContent'] = result
+        return call_result
 
     async def _tools_list(
-        self, params: dict[str, Any], session: Session
-    ) -> dict[str, Any] | None:
+        self, params: dict[str, Any], context: Context
+    ) -> dict[str, Any]:
         cursor = params.get('cursor')
 
-        return await self._tools.list_tools(cursor=cursor)
+        result = await self._tools.list_tools(context, cursor=cursor)
+        return {**result, **CACHE_HINTS}

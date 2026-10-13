@@ -12,8 +12,17 @@ Media type for the TOON serialization format.
 See also: https://github.com/toon-format/toon#media-type--file-extension.
 """
 
-SUPPORTED_MCP_PROTOCOL_VERSIONS = frozenset({'2025-06-18', '2025-11-25'})
+SUPPORTED_MCP_PROTOCOL_VERSIONS = frozenset({'2026-07-28'})
 """MCP protocol versions that ``falcon-mcp-server`` recognizes."""
+
+META_PROTOCOL_VERSION = 'io.modelcontextprotocol/protocolVersion'
+"""Request ``_meta`` key carrying the MCP protocol version."""
+
+META_CLIENT_CAPABILITIES = 'io.modelcontextprotocol/clientCapabilities'
+"""Request ``_meta`` key carrying the client capabilities."""
+
+META_SERVER_INFO = 'io.modelcontextprotocol/serverInfo'
+"""Result ``_meta`` key identifying the server software."""
 
 PROJECT_URL = 'https://github.com/falconry/falcon-mcp-server'
 """GitHub URL of this project."""
