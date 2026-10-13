@@ -142,6 +142,19 @@ async def get_temperature(city: str) -> str:
     ...
 ```
 
+Besides the fixed contents of `add_simple_resource`, a resource can be read by
+a callable, which is awaited on every read. It returns text (`str`) or binary
+data (`bytes`), and receives the context in the same way as a tool does:
+```python
+async def get_usage(context: Context) -> str:
+    """Storage and bandwidth used by the account this month."""
+    account = context.path_params['account']
+    ...
+
+
+mcp.add_resource('usage://current', 'application/json', get_usage)
+```
+
 Requests from web browsers (i.e., the ones carrying an `Origin` header) are
 rejected with HTTP 403 unless their origin is explicitly allowed. Optionally,
 the same origins can also be granted access via CORS:

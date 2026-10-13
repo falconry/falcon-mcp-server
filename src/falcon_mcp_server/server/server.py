@@ -238,7 +238,7 @@ class RPCServer:
         self, params: dict[str, Any], context: Context
     ) -> dict[str, Any]:
         uri = _get_str(params, 'uri')
-        resource = await self._resources.read_resource(uri)
+        resource = await self._resources.read_resource(context, uri)
         return {'contents': [resource], **CACHE_HINTS}
 
     async def _tools_call(

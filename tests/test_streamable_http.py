@@ -656,19 +656,10 @@ def test_error_details_concealed(client, server, caplog, method, register):
     assert 'Traceback' in caplog.text
 
 
-def break_resource(server, exception):
-    async def fetch():
-        raise exception
-
-    # NOTE: There is no public way to add a resource that can fail yet.
-    resources = server._rpc_server.resources._resources
-    resources['file:///hello.txt'].fetch = fetch
-
-
 def test_resource_error_details_concealed(client, server, caplog):
-    break_resource(server, RuntimeError('out of ideas'))
+    server.add_resource('file:///broken.txt', 'text/plain', broken)
 
-    resp = rpc(client, 'resources/read', {'uri': 'file:///hello.txt'})
+    resp = rpc(client, 'resources/read', {'uri': 'file:///broken.txt'})
     assert resp.status_code == 200
     assert resp.json['error']['code'] == INTERNAL_ERROR
     assert 'out of ideas' not in resp.text
@@ -699,10 +690,11 @@ def test_http_error_passed_through(client, server, caplog, method, register):
 
 
 def test_resource_http_error_passed_through(client, server, caplog):
-    break_resource(server, falcon.HTTPForbidden())
+    server.add_resource('file:///guarded.txt', 'text/plain', guarded)
 
-    resp = rpc(client, 'resources/read', {'uri': 'file:///hello.txt'})
-    assert resp.status_code == 403
+    resp = rpc(client, 'resources/read', {'uri': 'file:///guarded.txt'})
+    assert resp.status_code == 401
+    assert resp.headers['WWW-Authenticate'] == 'Bearer'
     assert not caplog.records
 
 
@@ -792,6 +784,169 @@ def test_binary_resource(client, server):
     assert resp.json['result']['contents'] == [
         {'uri': uri, 'mimeType': 'application/octet-stream', 'blob': 'AP8='}
     ]
+
+
+def test_resource_callable(client, server):
+    reads = []
+
+    async def count_reads() -> str:
+        """Number of times that this resource has been read."""
+        reads.append(None)
+        return f'Read {len(reads)} time(s).'
+
+    uri = 'stats://reads'
+    server.add_resource(uri, 'text/plain', count_reads)
+
+    resp = rpc(client, 'resources/list')
+    assert resp.status_code == 200
+    assert resp.json['result']['resources'][-1] == {
+        'uri': uri,
+        'name': 'reads',
+        'title': 'reads',
+        'description': 'Number of times that this resource has been read.',
+        'mimeType': 'text/plain',
+    }
+
+    for count in (1, 2):
+        resp = rpc(client, 'resources/read', {'uri': uri})
+        assert resp.status_code == 200
+        assert resp.json['result']['contents'] == [
+            {
+                'uri': uri,
+                'mimeType': 'text/plain',
+                'text': f'Read {count} time(s).',
+            }
+        ]
+
+
+async def report() -> bytes:
+    """Latest usage report."""
+    return b'\x00\xff'
+
+
+def test_resource_metadata(client, server):
+    latest = 'file:///reports/latest.bin'
+    other = 'file:///reports/other.bin'
+    media_type = 'application/octet-stream'
+    server.add_resource(latest, media_type, report)
+    server.add_resource(
+        other,
+        media_type,
+        report,
+        name='other',
+        title='Other report',
+        description='Another usage report.',
+    )
+
+    resp = rpc(client, 'resources/list')
+    assert resp.status_code == 200
+    assert resp.json['result']['resources'][-2:] == [
+        {
+            'uri': latest,
+            'name': 'latest.bin',
+            'title': 'latest.bin',
+            'description': 'Latest usage report.',
+            'mimeType': media_type,
+        },
+        {
+            'uri': other,
+            'name': 'other',
+            'title': 'Other report',
+            'description': 'Another usage report.',
+            'mimeType': media_type,
+        },
+    ]
+
+    resp = rpc(client, 'resources/read', {'uri': latest})
+    assert resp.status_code == 200
+    assert resp.json['result']['contents'] == [
+        {'uri': latest, 'mimeType': media_type, 'blob': 'AP8='}
+    ]
+
+
+def test_duplicate_resource(server):
+    with pytest.raises(ValueError):
+        server.add_resource('file:///hello.txt', 'text/plain', report)
+    with pytest.raises(ValueError):
+        server.add_simple_resource('file:///hello.txt', 'text/plain', 'Hi!')
+
+
+@pytest.mark.parametrize(
+    'uri',
+    [
+        '',
+        'report',
+        '://report',
+        '/reports/latest.txt',
+        '1st://report',
+        'file:///monthly report.txt',
+        'file:///m\xe5nadsrapport.txt',
+        'file:///report%2.txt',
+        'file:///reports/{name}',
+        'file:///report.txt\n',
+    ],
+)
+def test_invalid_resource_uri(server, uri):
+    with pytest.raises(ValueError, match='valid URI'):
+        server.add_resource(uri, 'text/plain', report, name='report')
+    with pytest.raises(ValueError, match='valid URI'):
+        server.add_simple_resource(uri, 'text/plain', 'Hi!', name='report')
+
+
+@pytest.mark.parametrize(
+    'uri,name',
+    [
+        ('file:///monthly%20report.txt', 'monthly%20report.txt'),
+        ('git://example.com/reports.git', 'reports.git'),
+        ('https://example.com/reports/latest', 'latest'),
+        ('x-reports+v1.0://latest', 'latest'),
+    ],
+)
+def test_resource_default_name(client, server, uri, name):
+    server.add_resource(uri, 'text/plain', report)
+
+    resp = rpc(client, 'resources/list')
+    assert resp.status_code == 200
+    assert resp.json['result']['resources'][-1]['name'] == name
+
+
+@pytest.mark.parametrize(
+    'uri',
+    [
+        'urn:example:report',
+        'mailto:reports@example.com',
+        'reports://',
+        'file:///reports/',
+    ],
+)
+def test_resource_name_not_derivable(client, server, uri):
+    with pytest.raises(ValueError, match='name'):
+        server.add_resource(uri, 'text/plain', report)
+    with pytest.raises(ValueError, match='name'):
+        server.add_simple_resource(uri, 'text/plain', 'Hi!')
+
+    server.add_resource(uri, 'text/plain', report, name='report')
+
+    resp = rpc(client, 'resources/list')
+    assert resp.status_code == 200
+    assert resp.json['result']['resources'][-1]['name'] == 'report'
+
+
+async def account_summary(context: Context) -> str:
+    return f'Account {context.path_params["account"]}.'
+
+
+def test_resource_context(account_client, server):
+    server.add_resource('account://summary', 'text/plain', account_summary)
+
+    resp = rpc(
+        account_client,
+        'resources/read',
+        {'uri': 'account://summary'},
+        path='/accounts/42/mcp',
+    )
+    assert resp.status_code == 200
+    assert resp.json['result']['contents'][0]['text'] == 'Account 42.'
 
 
 @pytest.mark.parametrize(

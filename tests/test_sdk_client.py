@@ -80,6 +80,26 @@ async def test_sdk_client_tool_error():
         assert result.content[0].text == 'Unknown city: Atlantis'
 
 
+async def whereami(context: Context) -> str:
+    """Path that the request was sent to."""
+    return context.req.path
+
+
+@pytest.mark.anyio
+async def test_sdk_client_resource_callable():
+    server = falcon_mcp_server.MCP()
+    server.add_resource('server://path', 'text/plain', whereami)
+
+    async with connect(server.create_app()) as client:
+        resources = await client.list_resources()
+        assert [res.description for res in resources.resources] == [
+            'Path that the request was sent to.'
+        ]
+
+        result = await client.read_resource('server://path')
+        assert result.contents[0].text == '/mcp'
+
+
 LOCATE_SCHEMA = {
     'type': 'object',
     'properties': {

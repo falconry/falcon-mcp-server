@@ -98,6 +98,44 @@ class MCP:
             arguments=arguments,
         )
 
+    def add_resource(
+        self,
+        uri: str,
+        media_type: str,
+        resource: Callable[..., Awaitable[str | bytes]],
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+    ) -> None:
+        """Add a resource read by an async callable.
+
+        The callable is awaited on every read, and returns the contents as
+        text (``str``) or binary data (``bytes``). A parameter annotated with
+        :class:`Context` receives the request context.
+
+        Raise a :class:`falcon.HTTPError` to respond with that HTTP error.
+        Any other exception is logged, and reported without details.
+
+        Args:
+            uri: URI identifying the resource, as defined by RFC 3986.
+            media_type: Media type of the contents.
+            resource: Async callable returning the contents.
+            name: Name of the resource (default: the last segment of the URI).
+            title: Human-readable name of the resource for display purposes.
+            description: Description (default: the callable's docstring).
+
+        Raises:
+            ValueError: The URI is invalid or taken, or yields no default name.
+        """
+        self._rpc_server.resources.add_resource(
+            uri,
+            media_type,
+            resource,
+            name=name,
+            title=title,
+            description=description,
+        )
+
     def add_simple_resource(
         self,
         uri: str,
@@ -107,6 +145,19 @@ class MCP:
         title: str | None = None,
         description: str | None = None,
     ) -> None:
+        """Add a resource with fixed contents.
+
+        Args:
+            uri: URI identifying the resource, as defined by RFC 3986.
+            media_type: Media type of the contents.
+            data: The contents as text (``str``) or binary data (``bytes``).
+            name: Name of the resource (default: the last segment of the URI).
+            title: Human-readable name of the resource for display purposes.
+            description: Description (default: the title, or the name).
+
+        Raises:
+            ValueError: The URI is invalid or taken, or yields no default name.
+        """
         self._rpc_server.resources.add_simple_resource(
             uri,
             media_type,
