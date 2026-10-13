@@ -1,5 +1,14 @@
 # falcon-mcp-server
 
+`falcon-mcp-server` is a lightweight library for building MCP server endpoints
+on top of your [Falcon](https://github.com/falconry/falcon) application.
+
+> **Warning:** `falcon-mcp-server` is a fast-moving project in its early
+> stages. *Caveat emptor!*
+
+> **Note:** `falcon-mcp-server` was upgraded to the current version of the MCP
+> standard with substantial help from LLMs, under human supervision.
+
 [![PyPI - Version](https://img.shields.io/pypi/v/falcon-mcp-server.svg)](https://pypi.org/project/falcon-mcp-server)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/falcon-mcp-server.svg)](https://pypi.org/project/falcon-mcp-server)
 
