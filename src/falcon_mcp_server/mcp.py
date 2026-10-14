@@ -6,11 +6,16 @@ from collections.abc import Iterable
 from typing import Any
 
 import falcon.asgi
+from falcon.asgi import Request
+from falcon.asgi import Response
 
+from falcon_mcp_server.constants import WELL_KNOWN_RESOURCE_METADATA
 from falcon_mcp_server.server.server import RPCServer
 from falcon_mcp_server.server.tools import ResultSerializer
 from falcon_mcp_server.server.tools import ToolAnnotations
 from falcon_mcp_server.server.tools import ToolFilter
+from falcon_mcp_server.transport.authorization import Authenticator
+from falcon_mcp_server.transport.authorization import Authorization
 from falcon_mcp_server.transport.streamablehttp import StreamableHTTP
 
 
@@ -23,6 +28,12 @@ class MCP:
     The end point can also be added to an app on a route of your choice,
     including a templated one; the values of its fields are then available
     to tools and prompts as :attr:`Context.path_params`.
+
+    With ``resource_metadata``, the metadata of the end point is served via
+    the ``'metadata'`` suffix on the route formed by prepending
+    ``/.well-known/oauth-protected-resource`` to the route of the end point,
+    e.g., ``/.well-known/oauth-protected-resource/{account}/mcp`` for
+    ``/{account}/mcp``. :meth:`create_app` adds both routes.
 
     Args:
         allowed_origins: Origin(s) that web browsers are allowed to send
@@ -39,6 +50,12 @@ class MCP:
         result_serializer: Callable ``(result) -> str`` rendering a tool
             result that is not a string as text (default ``json.dumps``). A
             parameter annotated with :class:`Context` receives the context.
+        authenticator: Async callable ``(context) -> bool`` telling whether
+            a request is authenticated; HTTP 401 Unauthorized is rendered
+            otherwise (default: requests are not authenticated).
+        resource_metadata: OAuth 2.0 protected resource metadata (RFC 9728)
+            of the end point, such as ``authorization_servers``; the
+            ``resource`` is filled in from the request (default: none).
     """
 
     def __init__(
@@ -51,6 +68,8 @@ class MCP:
         instructions: str | None = None,
         tool_filter: ToolFilter | None = None,
         result_serializer: ResultSerializer | None = None,
+        authenticator: Authenticator | None = None,
+        resource_metadata: dict[str, Any] | None = None,
     ) -> None:
         if not isinstance(allowed_origins, str):
             allowed_origins = tuple(allowed_origins)
@@ -65,11 +84,24 @@ class MCP:
             tool_filter=tool_filter,
             result_serializer=result_serializer,
         )
+        self._authorization = Authorization(
+            authenticator=authenticator, resource_metadata=resource_metadata
+        )
         self._streamable_http = StreamableHTTP(
-            self._rpc_server, allowed_origins=allowed_origins
+            self._rpc_server,
+            allowed_origins=allowed_origins,
+            authorization=self._authorization,
         )
 
-        self.on_post = self._streamable_http.on_post
+    async def on_post(
+        self, req: Request, resp: Response, **params: Any
+    ) -> None:
+        await self._streamable_http.on_post(req, resp, **params)
+
+    async def on_get_metadata(
+        self, req: Request, resp: Response, **params: Any
+    ) -> None:
+        await self._authorization.on_get(req, resp)
 
     def add_prompt(
         self,
@@ -234,6 +266,9 @@ class MCP:
     ) -> falcon.asgi.App[falcon.asgi.Request, falcon.asgi.Response]:
         """Create a Falcon app serving this MCP end point at ``/mcp``.
 
+        With ``resource_metadata``, the app also serves the metadata at
+        ``/.well-known/oauth-protected-resource/mcp``.
+
         Args:
             cors_enable: Set to ``True`` to add :class:`falcon.CORSMiddleware`
                 letting web frontends served from the allowed origins access
@@ -246,4 +281,8 @@ class MCP:
             )
 
         app.add_route('/mcp', self)
+        if self._authorization.resource_metadata is not None:
+            app.add_route(
+                f'{WELL_KNOWN_RESOURCE_METADATA}/mcp', self, suffix='metadata'
+            )
         return app

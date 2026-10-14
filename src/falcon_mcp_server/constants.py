@@ -24,5 +24,12 @@ META_CLIENT_CAPABILITIES = 'io.modelcontextprotocol/clientCapabilities'
 META_SERVER_INFO = 'io.modelcontextprotocol/serverInfo'
 """Result ``_meta`` key identifying the server software."""
 
+WELL_KNOWN_RESOURCE_METADATA = '/.well-known/oauth-protected-resource'
+"""
+Path that the path of an end point is appended to, to get the location of its
+OAuth 2.0 protected resource metadata.
+See also: https://datatracker.ietf.org/doc/html/rfc9728#section-3.1.
+"""
+
 PROJECT_URL = 'https://github.com/falconry/falcon-mcp-server'
 """GitHub URL of this project."""

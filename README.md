@@ -223,6 +223,44 @@ mcp = falcon_mcp_server.MCP(allowed_origins=['http://localhost:6274'])
 app = mcp.create_app(cors_enable=True)
 ```
 
+To require authentication, pass an authenticator, i.e., an async callable
+that receives the context of a request, and tells whether the request is
+authenticated; any other request is rejected with HTTP 401. This is also where
+to check that an access token was issued for this very end point.
+
+Clients can then sign the user in via OAuth if the end point describes itself
+with protected resource metadata
+([RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728)), which names its
+authorization server(s). The 401 response points to the metadata, and its
+`resource` is filled in from the request (honoring `X-Forwarded-*` headers
+behind a reverse proxy):
+```python
+async def authenticate(context: Context) -> bool:
+    token = context.req.auth
+    ...
+
+
+mcp = falcon_mcp_server.MCP(
+    authenticator=authenticate,
+    resource_metadata={
+        'authorization_servers': ['https://auth.example.com'],
+        'scopes_supported': ['mcp'],
+    },
+)
+```
+
+`create_app()` serves the metadata at
+`/.well-known/oauth-protected-resource/mcp`. On an app of your own, add the
+well-known route via the `metadata` suffix:
+```python
+app.add_route('/{account:int}/mcp', mcp)
+app.add_route(
+    '/.well-known/oauth-protected-resource/{account:int}/mcp',
+    mcp,
+    suffix='metadata',
+)
+```
+
 ## License
 
 `falcon-mcp-server` is distributed under the terms of the [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html) license.

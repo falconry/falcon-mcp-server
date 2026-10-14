@@ -21,6 +21,7 @@ from falcon_mcp_server.constants import META_PROTOCOL_VERSION
 from falcon_mcp_server.constants import SUPPORTED_MCP_PROTOCOL_VERSIONS
 from falcon_mcp_server.context import Context
 from falcon_mcp_server.server.server import RPCServer
+from falcon_mcp_server.transport.authorization import Authorization
 
 # NOTE(vytas): MCP Streamable HTTP, 6.2. Standard Request Headers.
 #   Mcp-Name: params.name or params.uri; required for tools/call,
@@ -77,8 +78,10 @@ class StreamableHTTP:
         self,
         rpc_server: RPCServer,
         allowed_origins: str | Iterable[str] = (),
+        authorization: Authorization | None = None,
     ) -> None:
         self._rpc_server: RPCServer = rpc_server
+        self._authorization = authorization or Authorization()
 
         # NOTE(vytas): The same convention as falcon.CORSMiddleware's
         #   allow_origins: a single origin, '*' or an iterable of origins.
@@ -256,6 +259,11 @@ class StreamableHTTP:
                 path_params=params,
                 meta=meta if isinstance(meta, dict) else {},
             )
+
+            # NOTE(vytas): Authenticated ahead of the validation of headers,
+            #   so that a client without credentials learns about the need to
+            #   authorize rather than about protocol errors.
+            await self._authorization.authenticate(context)
 
             # NOTE(vytas): MCP Streamable HTTP, 2. Sending Messages.
             #   Header requirements for notification POSTs are not defined by

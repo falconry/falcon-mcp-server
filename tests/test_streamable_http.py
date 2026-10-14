@@ -1586,3 +1586,205 @@ def test_notification(client):
     )
     assert resp.status_code == 202
     assert not resp.content
+
+
+TOKEN = 'Bearer s3cr3t'
+RESOURCE_METADATA = {
+    'authorization_servers': ['https://auth.example'],
+    'scopes_supported': ['mcp:read', 'mcp:write'],
+}
+METADATA_URL = (
+    'http://falconframework.org/.well-known/oauth-protected-resource/mcp'
+)
+
+
+async def authenticate(context: Context) -> bool:
+    return context.req.get_header('Authorization') == TOKEN
+
+
+@pytest.fixture
+def auth_client():
+    mcp = falcon_mcp_server.MCP(
+        authenticator=authenticate, resource_metadata=RESOURCE_METADATA
+    )
+    return falcon.testing.TestClient(mcp.create_app())
+
+
+def test_authenticated(auth_client):
+    resp = rpc(auth_client, 'tools/list', headers={'Authorization': TOKEN})
+    assert resp.status_code == 200
+    assert resp.json['result']['tools'] == []
+
+
+def test_unauthenticated(auth_client):
+    resp = rpc(auth_client, 'server/discover')
+    assert resp.status_code == 401
+    assert resp.headers['WWW-Authenticate'] == (
+        f'Bearer resource_metadata="{METADATA_URL}", '
+        f'scope="mcp:read mcp:write"'
+    )
+
+
+def test_invalid_token(auth_client):
+    resp = rpc(
+        auth_client, 'server/discover', headers={'Authorization': 'Bearer x'}
+    )
+    assert resp.status_code == 401
+    assert resp.headers['WWW-Authenticate'] == (
+        f'Bearer error="invalid_token", '
+        f'resource_metadata="{METADATA_URL}", '
+        f'scope="mcp:read mcp:write"'
+    )
+
+
+def test_authentication_before_header_validation(auth_client):
+    headers = {'MCP-Protocol-Version': None, 'Mcp-Method': None}
+    resp = rpc(auth_client, 'tools/list', headers=headers)
+    assert resp.status_code == 401
+
+
+def test_unauthenticated_notification(auth_client):
+    resp = auth_client.simulate_post(
+        '/mcp',
+        json={'jsonrpc': '2.0', 'method': 'notifications/cancelled'},
+        headers={'Accept': 'application/json, text/event-stream'},
+    )
+    assert resp.status_code == 401
+
+
+def test_origin_checked_before_authentication(auth_client):
+    resp = rpc(auth_client, 'tools/list', headers={'Origin': ORIGIN})
+    assert resp.status_code == 403
+
+
+def test_authenticator_http_error_passed_through():
+    async def forbid(context: Context) -> bool:
+        raise falcon.HTTPForbidden(description='Account suspended.')
+
+    mcp = falcon_mcp_server.MCP(authenticator=forbid)
+    client = falcon.testing.TestClient(mcp.create_app())
+
+    resp = rpc(client, 'tools/list', headers={'Authorization': TOKEN})
+    assert resp.status_code == 403
+    assert resp.json['description'] == 'Account suspended.'
+
+
+@pytest.mark.parametrize(
+    'authorization, challenge',
+    [(None, 'Bearer'), ('Bearer x', 'Bearer error="invalid_token"')],
+)
+def test_authenticator_without_metadata(authorization, challenge):
+    mcp = falcon_mcp_server.MCP(authenticator=authenticate)
+    client = falcon.testing.TestClient(mcp.create_app())
+
+    headers = {'Authorization': authorization} if authorization else {}
+    resp = rpc(client, 'tools/list', headers=headers)
+    assert resp.status_code == 401
+    assert resp.headers['WWW-Authenticate'] == challenge
+
+    resp = client.simulate_get('/.well-known/oauth-protected-resource/mcp')
+    assert resp.status_code == 404
+
+
+def test_protected_resource_metadata(auth_client):
+    resp = auth_client.simulate_get(
+        '/.well-known/oauth-protected-resource/mcp'
+    )
+    assert resp.status_code == 200
+    assert resp.json == {
+        'resource': 'http://falconframework.org/mcp',
+        'bearer_methods_supported': ['header'],
+        **RESOURCE_METADATA,
+    }
+
+
+def test_protected_resource_metadata_overrides():
+    metadata = {
+        'resource': 'https://mcp.example/mcp',
+        'authorization_servers': ['https://auth.example'],
+        'bearer_methods_supported': ['header', 'body'],
+    }
+    mcp = falcon_mcp_server.MCP(resource_metadata=metadata)
+    client = falcon.testing.TestClient(mcp.create_app())
+
+    resp = client.simulate_get('/.well-known/oauth-protected-resource/mcp')
+    assert resp.json == metadata
+
+
+def test_protected_resource_metadata_forwarded(auth_client):
+    headers = {'X-Forwarded-Proto': 'https', 'X-Forwarded-Host': 'mcp.example'}
+
+    resp = auth_client.simulate_get(
+        '/.well-known/oauth-protected-resource/mcp', headers=headers
+    )
+    assert resp.json['resource'] == 'https://mcp.example/mcp'
+
+    resp = rpc(auth_client, 'tools/list', headers=headers)
+    assert resp.status_code == 401
+    assert resp.headers['WWW-Authenticate'].startswith(
+        'Bearer resource_metadata="https://mcp.example'
+        '/.well-known/oauth-protected-resource/mcp"'
+    )
+
+
+def test_protected_resource_metadata_templated_route():
+    contexts = []
+
+    async def authenticate_account(context: Context) -> bool:
+        contexts.append(context)
+        return False
+
+    mcp = falcon_mcp_server.MCP(
+        authenticator=authenticate_account,
+        resource_metadata=RESOURCE_METADATA,
+    )
+    app = falcon.asgi.App()
+    app.add_route('/accounts/{account:int}/mcp', mcp)
+    app.add_route(
+        '/.well-known/oauth-protected-resource/accounts/{account:int}/mcp',
+        mcp,
+        suffix='metadata',
+    )
+    client = falcon.testing.TestClient(app)
+
+    resp = rpc(client, 'tools/list', path='/accounts/42/mcp')
+    assert resp.status_code == 401
+    assert resp.headers['WWW-Authenticate'].startswith(
+        'Bearer resource_metadata="http://falconframework.org'
+        '/.well-known/oauth-protected-resource/accounts/42/mcp"'
+    )
+    (context,) = contexts
+    assert context.path_params == {'account': 42}
+    assert context.meta[META_VERSION] == VERSION
+
+    resp = client.simulate_get(
+        '/.well-known/oauth-protected-resource/accounts/42/mcp'
+    )
+    assert (
+        resp.json['resource'] == 'http://falconframework.org/accounts/42/mcp'
+    )
+
+
+def test_metadata_responder_without_metadata(server):
+    app = falcon.asgi.App()
+    app.add_route(
+        '/.well-known/oauth-protected-resource', server, suffix='metadata'
+    )
+    client = falcon.testing.TestClient(app)
+
+    resp = client.simulate_get('/.well-known/oauth-protected-resource')
+    assert resp.status_code == 404
+
+
+def test_responder_hooks():
+    async def forbid(req, resp, resource, params):
+        raise falcon.HTTPForbidden()
+
+    @falcon.before(forbid)
+    class GuardedMCP(falcon_mcp_server.MCP):
+        pass
+
+    client = falcon.testing.TestClient(GuardedMCP().create_app())
+
+    resp = rpc(client, 'tools/list')
+    assert resp.status_code == 403
