@@ -1057,6 +1057,31 @@ def test_resource_metadata(client, server):
     ]
 
 
+def test_resource_meta(client, server):
+    uri = 'ui://example/view.html'
+    media_type = 'text/html;profile=mcp-app'
+    meta = {'ui': {'csp': {'connectDomains': ['https://api.example.com']}}}
+    server.add_simple_resource(uri, media_type, '<p>Hi!</p>', meta=meta)
+
+    resp = rpc(client, 'resources/list')
+    assert resp.status_code == 200
+    (listed,) = [
+        res for res in resp.json['result']['resources'] if res['uri'] == uri
+    ]
+    assert listed['_meta'] == meta
+
+    resp = rpc(client, 'resources/read', {'uri': uri})
+    assert resp.status_code == 200
+    assert resp.json['result']['contents'] == [
+        {
+            'uri': uri,
+            'mimeType': media_type,
+            'text': '<p>Hi!</p>',
+            '_meta': meta,
+        }
+    ]
+
+
 def test_duplicate_resource(server):
     with pytest.raises(ValueError):
         server.add_resource('file:///hello.txt', 'text/plain', report)

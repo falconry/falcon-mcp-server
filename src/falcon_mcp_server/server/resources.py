@@ -25,6 +25,7 @@ class Resource:
     description: str
     media_type: str
     context_param: str | None = None
+    meta: dict[str, Any] = dataclasses.field(default_factory=dict)
 
     def marshal(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -34,6 +35,8 @@ class Resource:
             'description': self.description,
             'mimeType': self.media_type,
         }
+        if self.meta:
+            data['_meta'] = self.meta
         return data
 
 
@@ -59,6 +62,7 @@ class Resources:
         name: str | None = None,
         title: str | None = None,
         description: str | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> None:
         # NOTE(vytas): MCP Resources, 6.4. Custom URI Schemes.
         #   Custom URI schemes MUST be in accordance with RFC3986.
@@ -97,6 +101,7 @@ class Resources:
             description=description,
             media_type=media_type,
             context_param=find_context_param(resource),
+            meta=meta or {},
         )
 
     def add_simple_resource(
@@ -107,6 +112,7 @@ class Resources:
         name: str | None = None,
         title: str | None = None,
         description: str | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> None:
         async def read() -> str | bytes:
             return data
@@ -118,6 +124,7 @@ class Resources:
             name=name,
             title=title,
             description=description,
+            meta=meta,
         )
 
     async def list_resources(
@@ -130,7 +137,7 @@ class Resources:
 
     async def read_resource(
         self, context: Context, uri: str
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         if (resource := self._resources.get(uri)) is None:
             raise errors.RPCInvalidParam('Resource not found')
 
@@ -149,11 +156,18 @@ class Resources:
             log.exception(f'Error reading resource {uri}')
             raise errors.RPCInternalError(f'Error reading resource {uri}')
 
-        contents = {'uri': resource.uri, 'mimeType': resource.media_type}
+        contents: dict[str, Any] = {
+            'uri': resource.uri,
+            'mimeType': resource.media_type,
+        }
         # NOTE(vytas): MCP Resources, 8. Security Considerations.
         #   Binary data MUST be properly encoded.
         if isinstance(data, bytes):
             contents['blob'] = base64.b64encode(data).decode()
         else:
             contents['text'] = data
+        # NOTE(vytas): MCP Apps, e.g., read the CSP of a ui:// view from the
+        #   _meta of its contents.
+        if resource.meta:
+            contents['_meta'] = resource.meta
         return contents

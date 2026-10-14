@@ -191,6 +191,22 @@ mcp.add_tool(show_temperature, meta={'ui': {'resourceUri': WIDGET_URI}})
 mcp.add_resource(WIDGET_URI, 'text/html;profile=mcp-app', read_widget)
 ```
 
+A widget that loads scripts, styles or media from elsewhere, or connects to
+other origins, declares them in the `_meta` of its resource; the host builds
+the Content Security Policy of the widget from them:
+```python
+csp = {
+    'resourceDomains': ['https://cdn.example.com'],
+    'connectDomains': ['https://api.example.com'],
+}
+mcp.add_resource(
+    WIDGET_URI,
+    'text/html;profile=mcp-app',
+    read_widget,
+    meta={'ui': {'csp': csp}},
+)
+```
+
 See ``examples/widget.py`` and ``examples/widget.html`` for the complete
 example. It runs in the same way as the first one:
 ```console

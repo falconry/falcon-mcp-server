@@ -112,6 +112,7 @@ class MCP:
         name: str | None = None,
         title: str | None = None,
         description: str | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> None:
         """Add a resource read by an async callable.
 
@@ -129,6 +130,7 @@ class MCP:
             name: Name of the resource (default: the last segment of the URI).
             title: Human-readable name of the resource for display purposes.
             description: Description (default: the callable's docstring).
+            meta: The ``_meta`` object of the resource, e.g., an app's CSP.
 
         Raises:
             ValueError: The URI is invalid or taken, or yields no default name.
@@ -140,6 +142,7 @@ class MCP:
             name=name,
             title=title,
             description=description,
+            meta=meta,
         )
 
     def add_simple_resource(
@@ -150,6 +153,7 @@ class MCP:
         name: str | None = None,
         title: str | None = None,
         description: str | None = None,
+        meta: dict[str, Any] | None = None,
     ) -> None:
         """Add a resource with fixed contents.
 
@@ -160,6 +164,7 @@ class MCP:
             name: Name of the resource (default: the last segment of the URI).
             title: Human-readable name of the resource for display purposes.
             description: Description (default: the title, or the name).
+            meta: The ``_meta`` object of the resource, e.g., an app's CSP.
 
         Raises:
             ValueError: The URI is invalid or taken, or yields no default name.
@@ -171,6 +176,7 @@ class MCP:
             name=name,
             title=title,
             description=description,
+            meta=meta,
         )
 
     def add_tool(
