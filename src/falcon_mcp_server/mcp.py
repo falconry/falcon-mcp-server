@@ -118,7 +118,7 @@ class MCP:
         of MCP prompt messages. A parameter annotated with :class:`Context`
         receives the request context instead of a prompt argument.
 
-        Raise a :class:`falcon.HTTPError` to respond with that HTTP error.
+        Raise a ``falcon.HTTPError`` to respond with that HTTP error.
         Any other exception is logged, and reported without details.
 
         Args:
@@ -152,7 +152,7 @@ class MCP:
         text (``str``) or binary data (``bytes``). A parameter annotated with
         :class:`Context` receives the request context.
 
-        Raise a :class:`falcon.HTTPError` to respond with that HTTP error.
+        Raise a ``falcon.HTTPError`` to respond with that HTTP error.
         Any other exception is logged, and reported without details.
 
         Args:
@@ -232,7 +232,7 @@ class MCP:
         ``dict`` is also sent as structured content.
 
         Raise :class:`ToolError` to report an error that the model can act
-        upon, or a :class:`falcon.HTTPError` to respond with that HTTP error.
+        upon, or a ``falcon.HTTPError`` to respond with that HTTP error.
         Any other exception is logged, and reported without details.
 
         Clients mirror an argument whose schema carries ``x-mcp-header`` into
@@ -270,7 +270,7 @@ class MCP:
         ``/.well-known/oauth-protected-resource/mcp``.
 
         Args:
-            cors_enable: Set to ``True`` to add :class:`falcon.CORSMiddleware`
+            cors_enable: Set to ``True`` to add ``falcon.CORSMiddleware``
                 letting web frontends served from the allowed origins access
                 the end point (default ``False``).
         """
