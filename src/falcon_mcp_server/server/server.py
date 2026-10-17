@@ -158,11 +158,8 @@ class RPCServer:
             or not isinstance(method_name, str)
             or not isinstance(params, dict)
         ):
-            raise falcon.HTTPUnprocessableEntity(
-                description=(
-                    'All MCP messages MUST follow the JSON-RPC 2.0 '
-                    'specification.'
-                )
+            raise errors.RPCInvalidRequest(
+                'All MCP messages MUST follow the JSON-RPC 2.0 specification.'
             )
 
         log.debug(f'Handle {rpc_req=}')

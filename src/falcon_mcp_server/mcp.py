@@ -1,5 +1,6 @@
 """MCP end point component."""
 
+import asyncio
 from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Iterable
@@ -35,6 +36,9 @@ class MCP:
     e.g., ``/.well-known/oauth-protected-resource/{account}/mcp`` for
     ``/{account}/mcp``. :meth:`create_app` adds both routes.
 
+    Instead of HTTP, the server can also serve the client that launched it as
+    a subprocess over stdio, see :meth:`run_stdio`.
+
     Args:
         allowed_origins: Origin(s) that web browsers are allowed to send
             requests from, or ``'*'`` to allow any origin. Requests carrying
@@ -51,8 +55,8 @@ class MCP:
             result that is not a string as text (default ``json.dumps``). A
             parameter annotated with :class:`Context` receives the context.
         authenticator: Async callable ``(context) -> bool`` telling whether
-            a request is authenticated; HTTP 401 Unauthorized is rendered
-            otherwise (default: requests are not authenticated).
+            an HTTP request is authenticated; HTTP 401 Unauthorized is
+            rendered otherwise (default: requests are not authenticated).
         resource_metadata: OAuth 2.0 protected resource metadata (RFC 9728)
             of the end point, such as ``authorization_servers``; the
             ``resource`` is filled in from the request (default: none).
@@ -286,3 +290,50 @@ class MCP:
                 f'{WELL_KNOWN_RESOURCE_METADATA}/mcp', self, suffix='metadata'
             )
         return app
+
+    async def serve_stdio(self) -> None:
+        """Serve the client that launched this process over stdio.
+
+        Messages are read from stdin until it is closed, and written to
+        stdout; anything else that the app prints goes to stderr meanwhile.
+
+        The context of a request carries a placeholder HTTP request to
+        ``localhost`` without any headers or parameters. The allowed origins
+        and the resource metadata only apply to HTTP. So does the
+        authenticator, which is why an end point configured with one refuses
+        to serve stdio; check any credentials from the environment before
+        serving instead.
+
+        Raises:
+            RuntimeError: The end point is configured with an authenticator.
+        """
+        # NOTE(vytas): MCP Authorization.
+        #   Implementations using an STDIO transport SHOULD NOT follow this
+        #   specification, and instead retrieve credentials from the
+        #   environment.
+        # NOTE(vytas): Refused rather than ignored, lest the authenticator is
+        #   mistaken for protecting stdio as well. (Warnings on stderr tend to
+        #   go unnoticed, as clients may capture or ignore it.)
+        if self._authorization.authenticator is not None:
+            raise RuntimeError(
+                'The authenticator only applies to HTTP; create the end point '
+                'without one to serve stdio, and check any credentials from '
+                'the environment before serving instead.'
+            )
+
+        # NOTE(vytas): Imported here, so that HTTP apps do not load
+        #   falcon.testing just for the placeholder requests.
+        from falcon_mcp_server.transport.stdio import Stdio
+
+        await Stdio(self._rpc_server).serve()
+
+    def run_stdio(self) -> None:
+        """Run :meth:`serve_stdio` in a new event loop until stdin is closed.
+
+        Use :meth:`serve_stdio` instead to set up anything asynchronous, such
+        as an HTTP client for the tools, in the same event loop beforehand.
+
+        Raises:
+            RuntimeError: The end point is configured with an authenticator.
+        """
+        asyncio.run(self.serve_stdio())

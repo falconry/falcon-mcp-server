@@ -14,7 +14,7 @@ class Context:
     annotates with this class, if any.
 
     Attributes:
-        req: HTTP request carrying the MCP request.
+        req: HTTP request carrying the MCP request (a placeholder on stdio).
         path_params: Field values of the URI template matching the request.
         meta: The ``_meta`` object of the MCP request.
     """

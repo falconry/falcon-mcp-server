@@ -273,6 +273,10 @@ class StreamableHTTP:
                 self._validate_param_headers(context, rpc_req)
 
             result = await self._rpc_server.handle(rpc_req, context)
+        except errors.RPCInvalidRequest as ex:
+            # NOTE(vytas): Rejected at the HTTP level, same as a body that is
+            #   not a JSON object.
+            raise falcon.HTTPUnprocessableEntity(description=ex.message)
         except errors.RPCError as ex:
             rpc_resp = {'jsonrpc': '2.0', 'error': ex.marshal()}
             if (req_id := rpc_req.get('id')) is not None:

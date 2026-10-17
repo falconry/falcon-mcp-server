@@ -1588,6 +1588,22 @@ def test_notification(client):
     assert not resp.content
 
 
+@pytest.mark.parametrize(
+    'body',
+    [
+        ['not', 'an', 'object'],
+        {'jsonrpc': '1.0', 'method': 'notifications/cancelled'},
+    ],
+)
+def test_not_json_rpc(client, body):
+    resp = client.simulate_post(
+        '/mcp',
+        json=body,
+        headers={'Accept': 'application/json, text/event-stream'},
+    )
+    assert resp.status_code == 422
+
+
 TOKEN = 'Bearer s3cr3t'
 RESOURCE_METADATA = {
     'authorization_servers': ['https://auth.example'],

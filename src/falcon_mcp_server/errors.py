@@ -30,6 +30,14 @@ class RPCError(Exception):
         return error
 
 
+class RPCParseError(RPCError):
+    code = -32700
+
+
+class RPCInvalidRequest(RPCError):
+    code = -32600
+
+
 class RPCMethodNotFound(RPCError):
     code = -32601
 

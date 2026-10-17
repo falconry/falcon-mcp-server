@@ -85,3 +85,8 @@ mcp.add_simple_resource(
     README.read_text(),
     title='Project Documentation',
 )
+
+if __name__ == '__main__':
+    # NOTE: Run this file directly to serve a client over stdio, e.g.,
+    #   fast-agent go --stdio "python example.py" --model ...
+    mcp.run_stdio()

@@ -73,3 +73,6 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# fast-agent sessions (e.g., when trying out the examples)
+.fast-agent/
