@@ -101,15 +101,12 @@ class StreamableHTTP:
         #   Every POST request to the MCP endpoint MUST include an
         #   MCP-Protocol-Version header.
         if not (version := req.get_header('MCP-Protocol-Version')):
-            # NOTE(vytas): MCP Versioning, 4. Backward Compatibility with
-            #   Initialization-Based Versions.
-            #   A server that supports only modern versions SHOULD name the
-            #   protocol versions it supports in any error it returns to an
-            #   initialize request.
-            supported = ', '.join(sorted(SUPPORTED_MCP_PROTOCOL_VERSIONS))
+            # NOTE(vytas): This is also where a legacy initialize request ends
+            #   up on HTTP.
             raise errors.RPCHeaderMismatch(
-                f'Header mismatch: missing MCP-Protocol-Version header '
-                f'(supported protocol versions: {supported})'
+                errors.name_supported_versions(
+                    'Header mismatch: missing MCP-Protocol-Version header'
+                )
             )
         if version not in SUPPORTED_MCP_PROTOCOL_VERSIONS:
             raise errors.RPCUnsupportedProtocolVersion(version)

@@ -87,6 +87,20 @@ def test_discover(client):
     }
 
 
+def test_discover_capabilities():
+    mcp = falcon_mcp_server.MCP()
+    client = falcon.testing.TestClient(mcp.create_app())
+
+    resp = rpc(client, 'server/discover')
+    assert resp.status_code == 200
+    assert resp.json['result']['capabilities'] == {}
+
+    mcp.add_tool(ping)
+    resp = rpc(client, 'server/discover')
+    assert resp.status_code == 200
+    assert resp.json['result']['capabilities'] == {'tools': {}}
+
+
 def test_custom_identity():
     server_info = {
         'name': 'acme',
@@ -173,6 +187,13 @@ def test_resources(client):
             'text': 'Hello!',
         }
     ]
+
+    resp = rpc(client, 'resources/templates/list')
+    assert resp.status_code == 200
+    result = resp.json['result']
+    assert result['resultType'] == 'complete'
+    assert result['cacheScope'] == 'private'
+    assert result['resourceTemplates'] == []
 
 
 async def ping() -> str:
@@ -1204,6 +1225,7 @@ def test_missing_meta(client, missing):
     assert resp.status_code == 400
     assert resp.json['error']['code'] == INVALID_PARAMS
     assert missing in resp.json['error']['message']
+    assert VERSION in resp.json['error']['message']
 
 
 def test_unsupported_protocol_version(client):

@@ -221,6 +221,25 @@ def test_errors(run, server, message, req_id, code):
     assert resp['error']['code'] == code
 
 
+def test_legacy_initialize(run, server):
+    (resp,) = run(
+        server,
+        {
+            'jsonrpc': '2.0',
+            'id': 0,
+            'method': 'initialize',
+            'params': {
+                'protocolVersion': '2025-11-25',
+                'capabilities': {},
+                'clientInfo': {'name': 'legacy', 'version': '1.0.0'},
+            },
+        },
+    )
+    assert resp['id'] == 0
+    assert resp['error']['code'] == INVALID_PARAMS
+    assert '2026-07-28' in resp['error']['message']
+
+
 def test_ignored_messages(run, server):
     assert (
         run(

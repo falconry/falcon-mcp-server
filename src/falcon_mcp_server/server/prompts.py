@@ -42,6 +42,9 @@ class Prompts:
         self._prompts: dict[str, Prompt] = {}
         self._prompt_list: list[str] = []
 
+    def __len__(self) -> int:
+        return len(self._prompts)
+
     @staticmethod
     def _derive_arguments(
         prompt: Callable[..., Awaitable[Any]], context_param: str | None

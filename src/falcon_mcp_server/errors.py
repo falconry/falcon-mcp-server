@@ -3,6 +3,17 @@ from typing import Any
 from falcon_mcp_server.constants import SUPPORTED_MCP_PROTOCOL_VERSIONS
 
 
+def name_supported_versions(message: str) -> str:
+    """Append the supported protocol versions to an error message."""
+    # NOTE(vytas): MCP Versioning, 4. Backward Compatibility with
+    #   Initialization-Based Versions.
+    #   A server that supports only modern versions SHOULD name the protocol
+    #   versions it supports in any error it returns to an initialize
+    #   request, on any transport.
+    supported = ', '.join(sorted(SUPPORTED_MCP_PROTOCOL_VERSIONS))
+    return f'{message} (supported protocol versions: {supported})'
+
+
 class ToolError(Exception):
     """Tool execution error that the model can act upon.
 
