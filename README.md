@@ -261,6 +261,38 @@ app.add_route(
 )
 ```
 
+Instead of HTTP, the server can also serve a client that launches it as a
+subprocess, via the
+[stdio](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio)
+transport. The example does so when run directly:
+```python
+if __name__ == '__main__':
+    mcp.run_stdio()
+```
+
+For instance, fast-agent can launch it itself (run from `examples/`, with the
+same Ollama model as above):
+```console
+fast-agent go --stdio "python example.py" --model generic.granite4:3b --message "What is the current temperature in London?"
+```
+
+While serving, stdout is reserved for MCP messages, so anything that the app
+prints goes to stderr instead. The context of a request carries a placeholder
+Falcon request to `localhost` without any headers or parameters. The allowed
+origins and the resource metadata only apply to HTTP. So does the
+authenticator, which is why an end point configured with one refuses to serve
+stdio. Clients pass any credentials via environment variables instead, so
+check them before serving. To do that, or any other asynchronous setup, in the
+same event loop as the server, await `serve_stdio()` instead:
+```python
+async def main():
+    await log_in(os.environ['WEATHER_API_TOKEN'])
+    await mcp.serve_stdio()
+
+
+asyncio.run(main())
+```
+
 ## License
 
 `falcon-mcp-server` is distributed under the terms of the [Apache-2.0](https://spdx.org/licenses/Apache-2.0.html) license.

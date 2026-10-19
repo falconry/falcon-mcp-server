@@ -1,5 +1,8 @@
 """Integration tests using the client from the official MCP Python SDK."""
 
+import pathlib
+import sys
+
 import pytest
 
 import falcon_mcp_server
@@ -8,7 +11,10 @@ from falcon_mcp_server import Context
 httpx2 = pytest.importorskip('httpx2')
 mcp = pytest.importorskip('mcp')
 
+from mcp.client.stdio import StdioServerParameters  # noqa: E402
 from mcp.client.streamable_http import streamable_http_client  # noqa: E402
+
+EXAMPLES = pathlib.Path(__file__).resolve().parent.parent / 'examples'
 
 
 @pytest.fixture
@@ -190,3 +196,22 @@ async def test_sdk_client_discovery():
         assert client.server_info.title == 'ACME Tools'
         assert client.server_info.version == '2.3.4'
         assert client.instructions == 'Search before fetching.'
+
+
+@pytest.mark.anyio
+async def test_sdk_client_stdio():
+    server = StdioServerParameters(
+        command=sys.executable, args=[str(EXAMPLES / 'example.py')]
+    )
+
+    async with mcp.Client(server) as client:
+        assert client.protocol_version == '2026-07-28'
+
+        tools = await client.list_tools()
+        assert [tool.name for tool in tools.tools] == ['get_temperature']
+
+        result = await client.call_tool('get_temperature', {'city': 'London'})
+        assert not result.is_error
+        assert result.content[0].text == (
+            'The current temperature in London is 15°C.'
+        )

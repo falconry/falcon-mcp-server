@@ -67,6 +67,7 @@ class RPCServer:
             # Resources
             'resources/list': self._resources_list,
             'resources/read': self._resources_read,
+            'resources/templates/list': self._resources_templates_list,
             # Tools
             'tools/call': self._tools_call,
             'tools/list': self._tools_list,
@@ -128,10 +129,14 @@ class RPCServer:
         # NOTE(vytas): MCP Overview, 6.1. _meta.
         #   A request missing any required field is malformed; the server MUST
         #   reject it with JSON-RPC error code -32602 (Invalid params).
+        # NOTE(vytas): This is also where a legacy initialize request ends up
+        #   on stdio.
         for key in (META_PROTOCOL_VERSION, META_CLIENT_CAPABILITIES):
             if key not in meta:
                 raise errors.RPCInvalidParam(
-                    f'Missing required _meta field: {key}'
+                    errors.name_supported_versions(
+                        f'Missing required _meta field: {key}'
+                    )
                 )
 
         # NOTE(vytas): MCP Versioning, 2. Protocol Version Negotiation.
@@ -158,11 +163,8 @@ class RPCServer:
             or not isinstance(method_name, str)
             or not isinstance(params, dict)
         ):
-            raise falcon.HTTPUnprocessableEntity(
-                description=(
-                    'All MCP messages MUST follow the JSON-RPC 2.0 '
-                    'specification.'
-                )
+            raise errors.RPCInvalidRequest(
+                'All MCP messages MUST follow the JSON-RPC 2.0 specification.'
             )
 
         log.debug(f'Handle {rpc_req=}')
@@ -208,12 +210,19 @@ class RPCServer:
     async def _server_discover(
         self, params: dict[str, Any], context: Context
     ) -> dict[str, Any]:
+        # NOTE(vytas): MCP Tools, 2. Capabilities (ditto prompts, resources).
+        #   Servers that support tools MUST declare the tools capability.
+        # NOTE(vytas): Only the features with anything added are declared, so
+        #   that clients do not even list the others.
+        features = {
+            'prompts': self._prompts,
+            'resources': self._resources,
+            'tools': self._tools,
+        }
         result: dict[str, Any] = {
             'supportedVersions': sorted(SUPPORTED_MCP_PROTOCOL_VERSIONS),
             'capabilities': {
-                'prompts': {},
-                'resources': {},
-                'tools': {},
+                name: {} for name, feature in features.items() if feature
             },
             **CACHE_HINTS,
         }
@@ -252,6 +261,14 @@ class RPCServer:
         uri = _get_str(params, 'uri')
         resource = await self._resources.read_resource(context, uri)
         return {'contents': [resource], **CACHE_HINTS}
+
+    async def _resources_templates_list(
+        self, params: dict[str, Any], context: Context
+    ) -> dict[str, Any]:
+        cursor = params.get('cursor')
+
+        result = await self._resources.list_resource_templates(cursor=cursor)
+        return {**result, **CACHE_HINTS}
 
     async def _tools_call(
         self, params: dict[str, Any], context: Context

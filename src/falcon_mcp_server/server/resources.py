@@ -54,6 +54,9 @@ class Resources:
         self._resources: dict[str, Resource] = {}
         self._resource_templates: dict[str, Any] = {}
 
+    def __len__(self) -> int:
+        return len(self._resources)
+
     def add_resource(
         self,
         uri: str,
@@ -134,6 +137,13 @@ class Resources:
             resource.marshal() for resource in self._resources.values()
         )
         return {'resources': resources}
+
+    async def list_resource_templates(
+        self, cursor: str | None = None
+    ) -> dict[str, Any]:
+        # TODO(vytas): Resource templates are not supported yet; the list is
+        #   still served, since clients list them along with the resources.
+        return {'resourceTemplates': []}
 
     async def read_resource(
         self, context: Context, uri: str

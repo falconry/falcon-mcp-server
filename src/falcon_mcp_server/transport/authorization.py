@@ -23,7 +23,7 @@ class Authorization:
         authenticator: Authenticator | None = None,
         resource_metadata: dict[str, Any] | None = None,
     ) -> None:
-        self._authenticator = authenticator
+        self.authenticator = authenticator
         self.resource_metadata = resource_metadata
 
     @staticmethod
@@ -63,7 +63,7 @@ class Authorization:
         return f'Bearer {", ".join(params)}' if params else 'Bearer'
 
     async def authenticate(self, context: Context) -> None:
-        if self._authenticator is None or await self._authenticator(context):
+        if self.authenticator is None or await self.authenticator(context):
             return
 
         # NOTE(vytas): MCP Authorization, 9.2. Token Handling.

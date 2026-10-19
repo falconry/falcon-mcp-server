@@ -126,6 +126,9 @@ class Tools:
         self._tools: dict[str, Tool] = {}
         self._filter = tool_filter
 
+    def __len__(self) -> int:
+        return len(self._tools)
+
     def _is_visible(self, context: Context, tool: Tool) -> bool:
         return self._filter is None or self._filter(context, tool)
 
