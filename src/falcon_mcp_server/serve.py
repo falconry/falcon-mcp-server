@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026-present Vytautas Liuolia <vytautas.liuolia@gmail.com>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """Serve an instance of Server directly without adding it to a Falcon app."""
 
 import argparse

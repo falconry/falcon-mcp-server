@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026-present Vytautas Liuolia <vytautas.liuolia@gmail.com>
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """
 MCP stdio transport implementation.
 See also: https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio.
